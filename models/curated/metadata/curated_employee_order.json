@@ -1,6 +1,6 @@
 {
   "name": "curated_employee_order",
-  "sql": "SELECT\n    o.id AS order_id,\n    o.customer_id,\n    o.order_date,\n    o.required_date,\n    o.shipped_date,\n    o.ship_via,\n    o.freight,\n    o.ship_name,\n    o.ship_address,\n    o.ship_city,\n    o.ship_region,\n    o.ship_postal_code,\n    o.ship_country,\n    e.employee_id,\n    e.last_name,\n    e.first_name,\n    e.job_title,\n    e.city AS employee_city,\n    e.country AS employee_country\nFROM stg_employee e\nJOIN stg_order o\n  ON e.employee_id = o.employee_id;",
+  "sql": "SELECT\n    o.id AS order_id,\n   \n    o.order_date,\n    o.required_date,\n    o.shipped_date,\n    o.ship_via,\n    o.freight,\n    o.ship_name,\n    o.ship_address,\n    o.ship_city,\n    o.ship_region,\n    o.ship_postal_code,\n    o.ship_country,\n    e.employee_id,\n    e.last_name,\n    e.first_name,\n    e.job_title,\n    e.city AS employee_city,\n    e.country AS employee_country\nFROM stg_employee e\nJOIN stg_order o\n  ON e.employee_id = o.employee_id;",
   "tableDescription": "",
   "documentation": [
     {
@@ -8,16 +8,6 @@
       "type": "number",
       "nullable": false,
       "unique": true,
-      "description": "",
-      "testNull": true,
-      "testUnique": true,
-      "acceptedValues": ""
-    },
-    {
-      "name": "customer_id",
-      "type": "string",
-      "nullable": false,
-      "unique": false,
       "description": "",
       "testNull": false,
       "testUnique": false,
@@ -197,7 +187,6 @@
   "preview": [
     {
       "order_id": 10258,
-      "customer_id": "ERNSH",
       "order_date": "2012-07-17",
       "required_date": "2012-08-14",
       "shipped_date": "2012-07-23",
@@ -218,7 +207,6 @@
     },
     {
       "order_id": 10270,
-      "customer_id": "WARTH",
       "order_date": "2012-08-01",
       "required_date": "2012-08-29",
       "shipped_date": "2012-08-02",
@@ -239,7 +227,6 @@
     },
     {
       "order_id": 10275,
-      "customer_id": "MAGAA",
       "order_date": "2012-08-07",
       "required_date": "2012-09-04",
       "shipped_date": "2012-08-09",
@@ -260,7 +247,6 @@
     },
     {
       "order_id": 10285,
-      "customer_id": "QUICK",
       "order_date": "2012-08-20",
       "required_date": "2012-09-17",
       "shipped_date": "2012-08-26",
@@ -281,7 +267,6 @@
     },
     {
       "order_id": 10292,
-      "customer_id": "TRADH",
       "order_date": "2012-08-28",
       "required_date": "2012-09-25",
       "shipped_date": "2012-09-02",
@@ -302,7 +287,6 @@
     },
     {
       "order_id": 10293,
-      "customer_id": "TORTU",
       "order_date": "2012-08-29",
       "required_date": "2012-09-26",
       "shipped_date": "2012-09-11",
@@ -323,7 +307,6 @@
     },
     {
       "order_id": 10304,
-      "customer_id": "TORTU",
       "order_date": "2012-09-12",
       "required_date": "2012-10-10",
       "shipped_date": "2012-09-17",
@@ -344,7 +327,6 @@
     },
     {
       "order_id": 10306,
-      "customer_id": "ROMEY",
       "order_date": "2012-09-16",
       "required_date": "2012-10-14",
       "shipped_date": "2012-09-23",
@@ -365,7 +347,6 @@
     },
     {
       "order_id": 10311,
-      "customer_id": "DUMO",
       "order_date": "2012-09-20",
       "required_date": "2012-10-04",
       "shipped_date": "2012-09-26",
@@ -386,7 +367,6 @@
     },
     {
       "order_id": 10314,
-      "customer_id": "RATTC",
       "order_date": "2012-09-25",
       "required_date": "2012-10-23",
       "shipped_date": "2012-10-04",
@@ -407,7 +387,6 @@
     },
     {
       "order_id": 10316,
-      "customer_id": "RATTC",
       "order_date": "2012-09-27",
       "required_date": "2012-10-25",
       "shipped_date": "2012-10-08",
@@ -428,7 +407,6 @@
     },
     {
       "order_id": 10325,
-      "customer_id": "KOENE",
       "order_date": "2012-10-09",
       "required_date": "2012-10-23",
       "shipped_date": "2012-10-14",
@@ -449,7 +427,6 @@
     },
     {
       "order_id": 10340,
-      "customer_id": "BONAP",
       "order_date": "2012-10-29",
       "required_date": "2012-11-26",
       "shipped_date": "2012-11-08",
@@ -470,7 +447,6 @@
     },
     {
       "order_id": 10351,
-      "customer_id": "ERNSH",
       "order_date": "2012-11-11",
       "required_date": "2012-12-09",
       "shipped_date": "2012-11-20",
@@ -491,7 +467,6 @@
     },
     {
       "order_id": 10357,
-      "customer_id": "LILAS",
       "order_date": "2012-11-19",
       "required_date": "2012-12-17",
       "shipped_date": "2012-12-02",
@@ -512,7 +487,6 @@
     },
     {
       "order_id": 10361,
-      "customer_id": "QUICK",
       "order_date": "2012-11-22",
       "required_date": "2012-12-20",
       "shipped_date": "2012-12-03",
@@ -533,7 +507,6 @@
     },
     {
       "order_id": 10364,
-      "customer_id": "EASTC",
       "order_date": "2012-11-26",
       "required_date": "2013-01-07",
       "shipped_date": "2012-12-04",
@@ -554,7 +527,6 @@
     },
     {
       "order_id": 10371,
-      "customer_id": "LAMAI",
       "order_date": "2012-12-03",
       "required_date": "2012-12-31",
       "shipped_date": "2012-12-24",
@@ -575,7 +547,6 @@
     },
     {
       "order_id": 10374,
-      "customer_id": "WOLZA",
       "order_date": "2012-12-05",
       "required_date": "2013-01-02",
       "shipped_date": "2012-12-09",
@@ -596,7 +567,6 @@
     },
     {
       "order_id": 10376,
-      "customer_id": "MEREP",
       "order_date": "2012-12-09",
       "required_date": "2013-01-06",
       "shipped_date": "2012-12-13",
@@ -617,7 +587,6 @@
     },
     {
       "order_id": 10377,
-      "customer_id": "SEVES",
       "order_date": "2012-12-09",
       "required_date": "2013-01-06",
       "shipped_date": "2012-12-13",
@@ -638,7 +607,6 @@
     },
     {
       "order_id": 10385,
-      "customer_id": "SPLIR",
       "order_date": "2012-12-17",
       "required_date": "2013-01-14",
       "shipped_date": "2012-12-23",
@@ -659,7 +627,6 @@
     },
     {
       "order_id": 10387,
-      "customer_id": "SANTG",
       "order_date": "2012-12-18",
       "required_date": "2013-01-15",
       "shipped_date": "2012-12-20",
@@ -680,7 +647,6 @@
     },
     {
       "order_id": 10393,
-      "customer_id": "SAVEA",
       "order_date": "2012-12-25",
       "required_date": "2013-01-22",
       "shipped_date": "2013-01-03",
@@ -701,7 +667,6 @@
     },
     {
       "order_id": 10394,
-      "customer_id": "HUNGC",
       "order_date": "2012-12-25",
       "required_date": "2013-01-22",
       "shipped_date": "2013-01-03",
@@ -722,7 +687,6 @@
     },
     {
       "order_id": 10396,
-      "customer_id": "FRANK",
       "order_date": "2012-12-27",
       "required_date": "2013-01-10",
       "shipped_date": "2013-01-06",
@@ -743,7 +707,6 @@
     },
     {
       "order_id": 10400,
-      "customer_id": "EASTC",
       "order_date": "2013-01-01",
       "required_date": "2013-01-29",
       "shipped_date": "2013-01-16",
@@ -764,7 +727,6 @@
     },
     {
       "order_id": 10401,
-      "customer_id": "RATTC",
       "order_date": "2013-01-01",
       "required_date": "2013-01-29",
       "shipped_date": "2013-01-10",
@@ -785,7 +747,6 @@
     },
     {
       "order_id": 10405,
-      "customer_id": "LINOD",
       "order_date": "2013-01-06",
       "required_date": "2013-02-03",
       "shipped_date": "2013-01-22",
@@ -806,7 +767,6 @@
     },
     {
       "order_id": 10453,
-      "customer_id": "AROUT",
       "order_date": "2013-02-21",
       "required_date": "2013-03-21",
       "shipped_date": "2013-02-26",
@@ -827,7 +787,6 @@
     },
     {
       "order_id": 10461,
-      "customer_id": "LILAS",
       "order_date": "2013-02-28",
       "required_date": "2013-03-28",
       "shipped_date": "2013-03-05",
@@ -848,7 +807,6 @@
     },
     {
       "order_id": 10465,
-      "customer_id": "VAFFE",
       "order_date": "2013-03-05",
       "required_date": "2013-04-02",
       "shipped_date": "2013-03-14",
@@ -869,7 +827,6 @@
     },
     {
       "order_id": 10469,
-      "customer_id": "WHITC",
       "order_date": "2013-03-10",
       "required_date": "2013-04-07",
       "shipped_date": "2013-03-14",
@@ -890,7 +847,6 @@
     },
     {
       "order_id": 10473,
-      "customer_id": "ISLAT",
       "order_date": "2013-03-13",
       "required_date": "2013-03-27",
       "shipped_date": "2013-03-21",
@@ -911,7 +867,6 @@
     },
     {
       "order_id": 10482,
-      "customer_id": "LAZYK",
       "order_date": "2013-03-21",
       "required_date": "2013-04-18",
       "shipped_date": "2013-04-10",
@@ -932,7 +887,6 @@
     },
     {
       "order_id": 10486,
-      "customer_id": "HILAA",
       "order_date": "2013-03-26",
       "required_date": "2013-04-23",
       "shipped_date": "2013-04-02",
@@ -953,7 +907,6 @@
     },
     {
       "order_id": 10508,
-      "customer_id": "OTTIK",
       "order_date": "2013-04-16",
       "required_date": "2013-05-14",
       "shipped_date": "2013-05-13",
@@ -974,7 +927,6 @@
     },
     {
       "order_id": 10524,
-      "customer_id": "BERGS",
       "order_date": "2013-05-01",
       "required_date": "2013-05-29",
       "shipped_date": "2013-05-07",
@@ -995,7 +947,6 @@
     },
     {
       "order_id": 10525,
-      "customer_id": "BONAP",
       "order_date": "2013-05-02",
       "required_date": "2013-05-30",
       "shipped_date": "2013-05-23",
@@ -1016,7 +967,6 @@
     },
     {
       "order_id": 10537,
-      "customer_id": "RICSU",
       "order_date": "2013-05-14",
       "required_date": "2013-05-28",
       "shipped_date": "2013-05-19",
@@ -1037,7 +987,6 @@
     },
     {
       "order_id": 10542,
-      "customer_id": "KOENE",
       "order_date": "2013-05-20",
       "required_date": "2013-06-17",
       "shipped_date": "2013-05-26",
@@ -1058,7 +1007,6 @@
     },
     {
       "order_id": 10546,
-      "customer_id": "VICTE",
       "order_date": "2013-05-23",
       "required_date": "2013-06-20",
       "shipped_date": "2013-05-27",
@@ -1079,7 +1027,6 @@
     },
     {
       "order_id": 10558,
-      "customer_id": "AROUT",
       "order_date": "2013-06-04",
       "required_date": "2013-07-02",
       "shipped_date": "2013-06-10",
@@ -1100,7 +1047,6 @@
     },
     {
       "order_id": 10562,
-      "customer_id": "REGGC",
       "order_date": "2013-06-09",
       "required_date": "2013-07-07",
       "shipped_date": "2013-06-12",
@@ -1121,7 +1067,6 @@
     },
     {
       "order_id": 10567,
-      "customer_id": "HUNGO",
       "order_date": "2013-06-12",
       "required_date": "2013-07-10",
       "shipped_date": "2013-06-17",
@@ -1142,7 +1087,6 @@
     },
     {
       "order_id": 10579,
-      "customer_id": "LETSS",
       "order_date": "2013-06-25",
       "required_date": "2013-07-23",
       "shipped_date": "2013-07-04",
@@ -1163,7 +1107,6 @@
     },
     {
       "order_id": 10587,
-      "customer_id": "QUEDE",
       "order_date": "2013-07-02",
       "required_date": "2013-07-30",
       "shipped_date": "2013-07-09",
@@ -1184,7 +1127,6 @@
     },
     {
       "order_id": 10591,
-      "customer_id": "VAFFE",
       "order_date": "2013-07-07",
       "required_date": "2013-07-21",
       "shipped_date": "2013-07-16",
@@ -1205,7 +1147,6 @@
     },
     {
       "order_id": 10598,
-      "customer_id": "RATTC",
       "order_date": "2013-07-14",
       "required_date": "2013-08-11",
       "shipped_date": "2013-07-18",
@@ -1226,7 +1167,6 @@
     },
     {
       "order_id": 10604,
-      "customer_id": "FURIB",
       "order_date": "2013-07-18",
       "required_date": "2013-08-15",
       "shipped_date": "2013-07-29",
@@ -1247,7 +1187,6 @@
     },
     {
       "order_id": 10605,
-      "customer_id": "MEREP",
       "order_date": "2013-07-21",
       "required_date": "2013-08-18",
       "shipped_date": "2013-07-29",
@@ -1268,7 +1207,6 @@
     },
     {
       "order_id": 10612,
-      "customer_id": "SAVEA",
       "order_date": "2013-07-28",
       "required_date": "2013-08-25",
       "shipped_date": "2013-08-01",
@@ -1289,7 +1227,6 @@
     },
     {
       "order_id": 10616,
-      "customer_id": "GREAL",
       "order_date": "2013-07-31",
       "required_date": "2013-08-28",
       "shipped_date": "2013-08-05",
@@ -1310,7 +1247,6 @@
     },
     {
       "order_id": 10618,
-      "customer_id": "MEREP",
       "order_date": "2013-08-01",
       "required_date": "2013-09-12",
       "shipped_date": "2013-08-08",
@@ -1331,7 +1267,6 @@
     },
     {
       "order_id": 10626,
-      "customer_id": "BERGS",
       "order_date": "2013-08-11",
       "required_date": "2013-09-08",
       "shipped_date": "2013-08-20",
@@ -1352,7 +1287,6 @@
     },
     {
       "order_id": 10630,
-      "customer_id": "KOENE",
       "order_date": "2013-08-13",
       "required_date": "2013-09-10",
       "shipped_date": "2013-08-19",
@@ -1373,7 +1307,6 @@
     },
     {
       "order_id": 10653,
-      "customer_id": "FRANK",
       "order_date": "2013-09-02",
       "required_date": "2013-09-30",
       "shipped_date": "2013-09-19",
@@ -1394,7 +1327,6 @@
     },
     {
       "order_id": 10655,
-      "customer_id": "REGGC",
       "order_date": "2013-09-03",
       "required_date": "2013-10-01",
       "shipped_date": "2013-09-11",
@@ -1415,7 +1347,6 @@
     },
     {
       "order_id": 10664,
-      "customer_id": "FURIB",
       "order_date": "2013-09-10",
       "required_date": "2013-10-08",
       "shipped_date": "2013-09-19",
@@ -1436,7 +1367,6 @@
     },
     {
       "order_id": 10665,
-      "customer_id": "LONEP",
       "order_date": "2013-09-11",
       "required_date": "2013-10-09",
       "shipped_date": "2013-09-17",
@@ -1457,7 +1387,6 @@
     },
     {
       "order_id": 10668,
-      "customer_id": "WANDK",
       "order_date": "2013-09-15",
       "required_date": "2013-10-13",
       "shipped_date": "2013-09-23",
@@ -1478,7 +1407,6 @@
     },
     {
       "order_id": 10671,
-      "customer_id": "FRANR",
       "order_date": "2013-09-17",
       "required_date": "2013-10-15",
       "shipped_date": "2013-09-24",
@@ -1499,7 +1427,6 @@
     },
     {
       "order_id": 10677,
-      "customer_id": "ANTO",
       "order_date": "2013-09-22",
       "required_date": "2013-10-20",
       "shipped_date": "2013-09-26",
@@ -1520,7 +1447,6 @@
     },
     {
       "order_id": 10680,
-      "customer_id": "OLDWO",
       "order_date": "2013-09-24",
       "required_date": "2013-10-22",
       "shipped_date": "2013-09-26",
@@ -1541,7 +1467,6 @@
     },
     {
       "order_id": 10689,
-      "customer_id": "BERGS",
       "order_date": "2013-10-01",
       "required_date": "2013-10-29",
       "shipped_date": "2013-10-07",
@@ -1562,7 +1487,6 @@
     },
     {
       "order_id": 10690,
-      "customer_id": "HANAR",
       "order_date": "2013-10-02",
       "required_date": "2013-10-30",
       "shipped_date": "2013-10-03",
@@ -1583,7 +1507,6 @@
     },
     {
       "order_id": 10709,
-      "customer_id": "GOURL",
       "order_date": "2013-10-17",
       "required_date": "2013-11-14",
       "shipped_date": "2013-11-20",
@@ -1604,7 +1527,6 @@
     },
     {
       "order_id": 10710,
-      "customer_id": "FRANS",
       "order_date": "2013-10-20",
       "required_date": "2013-11-17",
       "shipped_date": "2013-10-23",
@@ -1625,7 +1547,6 @@
     },
     {
       "order_id": 10713,
-      "customer_id": "SAVEA",
       "order_date": "2013-10-22",
       "required_date": "2013-11-19",
       "shipped_date": "2013-10-24",
@@ -1646,7 +1567,6 @@
     },
     {
       "order_id": 10717,
-      "customer_id": "FRANK",
       "order_date": "2013-10-24",
       "required_date": "2013-11-21",
       "shipped_date": "2013-10-29",
@@ -1667,7 +1587,6 @@
     },
     {
       "order_id": 10718,
-      "customer_id": "KOENE",
       "order_date": "2013-10-27",
       "required_date": "2013-11-24",
       "shipped_date": "2013-10-29",
@@ -1688,7 +1607,6 @@
     },
     {
       "order_id": 10733,
-      "customer_id": "BERGS",
       "order_date": "2013-11-07",
       "required_date": "2013-12-05",
       "shipped_date": "2013-11-10",
@@ -1709,7 +1627,6 @@
     },
     {
       "order_id": 10743,
-      "customer_id": "AROUT",
       "order_date": "2013-11-17",
       "required_date": "2013-12-15",
       "shipped_date": "2013-11-21",
@@ -1730,7 +1647,6 @@
     },
     {
       "order_id": 10746,
-      "customer_id": "CHOPS",
       "order_date": "2013-11-19",
       "required_date": "2013-12-17",
       "shipped_date": "2013-11-21",
@@ -1751,7 +1667,6 @@
     },
     {
       "order_id": 10773,
-      "customer_id": "ERNSH",
       "order_date": "2013-12-11",
       "required_date": "2014-01-08",
       "shipped_date": "2013-12-16",
@@ -1772,7 +1687,6 @@
     },
     {
       "order_id": 10776,
-      "customer_id": "ERNSH",
       "order_date": "2013-12-15",
       "required_date": "2014-01-12",
       "shipped_date": "2013-12-18",
@@ -1793,7 +1707,6 @@
     },
     {
       "order_id": 10785,
-      "customer_id": "GROSR",
       "order_date": "2013-12-18",
       "required_date": "2014-01-15",
       "shipped_date": "2013-12-24",
@@ -1814,7 +1727,6 @@
     },
     {
       "order_id": 10788,
-      "customer_id": "QUICK",
       "order_date": "2013-12-22",
       "required_date": "2014-01-19",
       "shipped_date": "2014-01-19",
@@ -1835,7 +1747,6 @@
     },
     {
       "order_id": 10789,
-      "customer_id": "FOLIG",
       "order_date": "2013-12-22",
       "required_date": "2014-01-19",
       "shipped_date": "2013-12-31",
@@ -1856,7 +1767,6 @@
     },
     {
       "order_id": 10792,
-      "customer_id": "WOLZA",
       "order_date": "2013-12-23",
       "required_date": "2014-01-20",
       "shipped_date": "2013-12-31",
@@ -1877,7 +1787,6 @@
     },
     {
       "order_id": 10800,
-      "customer_id": "SEVES",
       "order_date": "2013-12-26",
       "required_date": "2014-01-23",
       "shipped_date": "2014-01-05",
@@ -1898,7 +1807,6 @@
     },
     {
       "order_id": 10813,
-      "customer_id": "RICAR",
       "order_date": "2014-01-05",
       "required_date": "2014-02-02",
       "shipped_date": "2014-01-09",
@@ -1919,7 +1827,6 @@
     },
     {
       "order_id": 10821,
-      "customer_id": "SPLIR",
       "order_date": "2014-01-08",
       "required_date": "2014-02-05",
       "shipped_date": "2014-01-15",
@@ -1940,7 +1847,6 @@
     },
     {
       "order_id": 10825,
-      "customer_id": "DRACD",
       "order_date": "2014-01-09",
       "required_date": "2014-02-06",
       "shipped_date": "2014-01-14",
@@ -1961,7 +1867,6 @@
     },
     {
       "order_id": 10827,
-      "customer_id": "BONAP",
       "order_date": "2014-01-12",
       "required_date": "2014-01-26",
       "shipped_date": "2014-02-06",
@@ -1982,7 +1887,6 @@
     },
     {
       "order_id": 10834,
-      "customer_id": "TRADH",
       "order_date": "2014-01-15",
       "required_date": "2014-02-12",
       "shipped_date": "2014-01-19",
@@ -2003,7 +1907,6 @@
     },
     {
       "order_id": 10835,
-      "customer_id": "ALFKI",
       "order_date": "2014-01-15",
       "required_date": "2014-02-12",
       "shipped_date": "2014-01-21",
@@ -2024,7 +1927,6 @@
     },
     {
       "order_id": 10842,
-      "customer_id": "TORTU",
       "order_date": "2014-01-20",
       "required_date": "2014-02-17",
       "shipped_date": "2014-01-29",
@@ -2045,7 +1947,6 @@
     },
     {
       "order_id": 10850,
-      "customer_id": "VICTE",
       "order_date": "2014-01-23",
       "required_date": "2014-03-06",
       "shipped_date": "2014-01-30",
@@ -2066,7 +1967,6 @@
     },
     {
       "order_id": 10859,
-      "customer_id": "FRANK",
       "order_date": "2014-01-29",
       "required_date": "2014-02-26",
       "shipped_date": "2014-02-02",
@@ -2087,7 +1987,6 @@
     },
     {
       "order_id": 10877,
-      "customer_id": "RICAR",
       "order_date": "2014-02-09",
       "required_date": "2014-03-09",
       "shipped_date": "2014-02-19",
@@ -2108,7 +2007,6 @@
     },
     {
       "order_id": 10886,
-      "customer_id": "HANAR",
       "order_date": "2014-02-13",
       "required_date": "2014-03-13",
       "shipped_date": "2014-03-02",
@@ -2129,7 +2027,6 @@
     },
     {
       "order_id": 10888,
-      "customer_id": "GODOS",
       "order_date": "2014-02-16",
       "required_date": "2014-03-16",
       "shipped_date": "2014-02-23",
@@ -2150,7 +2047,6 @@
     },
     {
       "order_id": 10894,
-      "customer_id": "SAVEA",
       "order_date": "2014-02-18",
       "required_date": "2014-03-18",
       "shipped_date": "2014-02-20",
@@ -2171,7 +2067,6 @@
     },
     {
       "order_id": 10900,
-      "customer_id": "WELLI",
       "order_date": "2014-02-20",
       "required_date": "2014-03-20",
       "shipped_date": "2014-03-04",
@@ -2192,7 +2087,6 @@
     },
     {
       "order_id": 10902,
-      "customer_id": "FOLKO",
       "order_date": "2014-02-23",
       "required_date": "2014-03-23",
       "shipped_date": "2014-03-03",
@@ -2213,7 +2107,6 @@
     },
     {
       "order_id": 10909,
-      "customer_id": "SANTG",
       "order_date": "2014-02-26",
       "required_date": "2014-03-26",
       "shipped_date": "2014-03-10",
@@ -2234,7 +2127,6 @@
     },
     {
       "order_id": 10910,
-      "customer_id": "WILMK",
       "order_date": "2014-02-26",
       "required_date": "2014-03-26",
       "shipped_date": "2014-03-04",
@@ -2255,7 +2147,6 @@
     },
     {
       "order_id": 10916,
-      "customer_id": "RANCH",
       "order_date": "2014-02-27",
       "required_date": "2014-03-27",
       "shipped_date": "2014-03-09",
@@ -2276,7 +2167,6 @@
     },
     {
       "order_id": 10921,
-      "customer_id": "VAFFE",
       "order_date": "2014-03-03",
       "required_date": "2014-04-14",
       "shipped_date": "2014-03-09",
@@ -2296,6 +2186,5 @@
       "employee_country": "USA"
     }
   ],
-  "timestamp": "2025-08-11T14:00:14.649Z",
-  "chartsPath": "curated_employee_order_charts.html"
+  "timestamp": "2026-02-01T15:14:52.240Z"
 }

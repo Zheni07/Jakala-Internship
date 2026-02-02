@@ -1,6 +1,6 @@
 SELECT
     o.id AS order_id,
-    o.customer_id,
+   
     o.order_date,
     o.required_date,
     o.shipped_date,

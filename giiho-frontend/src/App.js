@@ -2493,7 +2493,9 @@ function App() {
     fetch(`http://localhost:4000/table/${selectedTable}`)
       .then(res => res.json())
       .then(data => {
-        setTableData(data);
+        // Backend returns an object: { data: [...rows], pagination: {...} }
+        // We only need the rows array for this simple table viewer.
+        setTableData(Array.isArray(data) ? data : (data.data || []));
         setLoading(false);
       })
       .catch(() => {
