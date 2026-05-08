@@ -1,6 +1,14 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import './App.css';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
+import { api, getToken } from './api';
+import { RequireAuth, LoginPage, RegisterPage, AppUserBar } from './AuthPages';
+import { UiBanner, UiCard, UiDataTable, UiEmptyState, UiPageHeader } from './ui';
+import AIDashboard from './AIDashboard';
+
+function asStringArray(value) {
+  return Array.isArray(value) ? value : [];
+}
 
 function LandingPage() {
   const navigate = useNavigate();
@@ -41,7 +49,7 @@ function LandingPage() {
         <div className="hero-left">
           <h1>Transform Your Data Visually</h1>
           <p className="hero-desc">A modern platform to manage, build, and launch your data pipelines with ease. Visualize dependencies, track execution, and document everything in one place.</p>
-          <button className="modern-cta" onClick={() => navigate('/app')}>Get Started</button>
+          <button className="modern-cta" onClick={() => navigate(getToken() ? '/app' : '/login')}>Get Started</button>
         </div>
         <div className="hero-right pipeline-center">
           <svg width="420" height="420" viewBox="0 0 420 420" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block', maxWidth: '100%', transform: 'scale(1.2)' }}>
@@ -151,7 +159,7 @@ function Staging() {
   const [saveStatus, setSaveStatus] = React.useState("");
   const [isPreviewing, setIsPreviewing] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
-  const [stagings, setStagings] = React.useState([]);
+  const [, setStagings] = React.useState([]);
   const [selectedStaging, setSelectedStaging] = React.useState("");
   const [documentation, setDocumentation] = React.useState([]); // [{name, type, nullable, unique, description, testNull, testUnique, nullWarning, uniqueWarning}]
   const [tableDescription, setTableDescription] = React.useState("");
@@ -160,9 +168,15 @@ function Staging() {
 
   // Load all saved stagings on mount or after save
   const loadStagings = useCallback(() => {
-    fetch("http://localhost:4000/stagings")
-      .then(res => res.json())
-      .then(data => setStagings(data.stagings || []))
+    api("/stagings")
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setStagings([]);
+          return;
+        }
+        setStagings(Array.isArray(data.stagings) ? data.stagings : []);
+      })
       .catch(() => {
         setStagings([]);
       });
@@ -174,11 +188,11 @@ function Staging() {
   // Load a selected staging
   React.useEffect(() => {
     if (!selectedStaging) return;
-    fetch(`http://localhost:4000/staging/${selectedStaging}`)
+    api(`/staging/${selectedStaging}`)
       .then(res => res.json())
       .then(data => {
-        setStagingName(data.name);
-        setSqlInput(data.sql);
+        setStagingName(data?.name || selectedStaging || "");
+        setSqlInput(data?.sql || "");
         setPreviewRows(data.preview || []);
         setDocumentation((data.documentation || []).map(col => {
           // Normalize field names: support both 'column' (old format) and 'name' (new format)
@@ -236,7 +250,7 @@ function Staging() {
   React.useEffect(() => {
     if (!selectedStaging && !saveStatus) return;
     // Fetch tables to ensure staged table appears in sidebar
-    fetch("http://localhost:4000/tables")
+    api("/tables")
       .then(res => res.json())
       .then(tableList => {
         if (typeof window !== 'undefined' && window.setTables) {
@@ -251,7 +265,7 @@ function Staging() {
     setDocumentation([]);
     setIsPreviewing(true);
     try {
-      const res = await fetch("http://localhost:4000/api/preview", {
+      const res = await api("/api/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: sqlInput })
@@ -351,7 +365,7 @@ function Staging() {
     setSaveStatus("");
     setIsSaving(true);
     try {
-      const res = await fetch("http://localhost:4000/save-staging-sql", {
+      const res = await api("/save-staging-sql", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -372,7 +386,7 @@ function Staging() {
         setSaveStatus("Staging saved successfully!");
         setSelectedStaging(stagingName); // reload this staging
         // Immediately refresh tables so Models updates
-        fetch("http://localhost:4000/tables").then(res => res.json()).then(tableList => {
+        api("/tables").then(res => res.json()).then(tableList => {
           if (typeof window !== 'undefined' && window.setTables) {
             window.setTables(tableList);
           }
@@ -422,7 +436,7 @@ function Staging() {
               <textarea
                 value={sqlInput}
                 onChange={e => setSqlInput(e.target.value)}
-                placeholder={"Write your SQL transformation here.\nExample: SELECT id, LOWER(name) AS name_cleaned FROM raw_customers WHERE name IS NOT NULL;"}
+                placeholder="SQL за трансформацията. Няма готови примери — започнете от вашите таблици след като качите .sqlite база; тогава използвайте Preview и Save."
                 style={{ width: '100%', minHeight: 120, fontSize: 15, padding: 8, borderRadius: 4, border: '1px solid #ccc', marginTop: 4 }}
               />
             </div>
@@ -442,15 +456,22 @@ function Staging() {
                 {isSaving ? 'Saving...' : 'Save Staging'}
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (!selectedStaging || !selectedStaging.startsWith('stg_')) return;
-                  const url = `http://localhost:4000/download-staged/${selectedStaging}`;
-                  const link = document.createElement('a');
-                  link.href = url;
-                  link.setAttribute('download', `${selectedStaging}.csv`);
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
+                  try {
+                    const r = await api(`/download-staged/${selectedStaging}`);
+                    const blob = await r.blob();
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.setAttribute('download', `${selectedStaging}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                  } catch (e) {
+                    setSaveStatus('Download failed.');
+                  }
                 }}
                 disabled={!selectedStaging || !selectedStaging.startsWith('stg_')}
                 style={{ padding: '10px 24px', fontSize: 16, background: '#222b45', color: '#fff', border: 'none', borderRadius: 6, cursor: (!selectedStaging || !selectedStaging.startsWith('stg_')) ? 'not-allowed' : 'pointer', fontWeight: 600 }}
@@ -577,6 +598,11 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
   const [showCuratedPanel, setShowCuratedPanel] = useState(false);
   const [showMartsPanel, setShowMartsPanel] = useState(false);
 
+  const tableList = asStringArray(tables);
+  const stagingNames = asStringArray(sidebarStagings);
+  const curatedNames = asStringArray(curatedModels);
+  const martNames = asStringArray(martsModels);
+
   // Effect: When switching to 'staging', clear selected table
   React.useEffect(() => {
     if (openSection === 'staging') {
@@ -585,7 +611,7 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
   }, [openSection, setSelectedTable]);
 
   // Add a function to filter only original (non-staged) tables
-  const sourceTables = tables.filter(
+  const sourceTables = tableList.filter(
     t => !t.toLowerCase().startsWith('stg_') &&
          !t.toLowerCase().startsWith('staging') &&
          !t.toLowerCase().includes('stg') &&
@@ -593,17 +619,15 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
          !t.toLowerCase().includes('hpjpp')
   );
 
-  // Add a function to filter only staged tables (models)
-  const modelTables = tables.filter(
-    t => t.toLowerCase().startsWith('stg_')
-  );
+  // Models should reflect only user-created staging layer objects, not raw DB table names.
+  const modelTables = stagingNames;
 
   // Add state for delete loading and error
   const [deletingStaging, setDeletingStaging] = React.useState("");
   const [deleteError, setDeleteError] = React.useState("");
 
   return (
-    <aside style={{ width: 220, background: '#222b45', color: '#fff', padding: 0, boxShadow: '2px 0 8px #0001', height: '100vh', minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'fixed', left: 0, top: 0, zIndex: 10, overflowY: 'auto' }}>
+    <aside style={{ width: 220, background: '#222b45', color: '#fff', padding: 0, boxShadow: '2px 0 8px #0001', height: 'calc(100vh - var(--app-userbar-height, 0px))', minHeight: 'calc(100vh - var(--app-userbar-height, 0px))', display: 'flex', flexDirection: 'column', position: 'fixed', left: 0, top: 'var(--app-userbar-height, 0px)', zIndex: 10, overflowY: 'auto' }}>
       <div style={{ padding: '24px 0 0 0', flex: 1, display: 'flex', flexDirection: 'column' }}>
         <div style={{ color: '#8f9bb3', fontWeight: 700, fontSize: 15, padding: '0 0 18px 26px', letterSpacing: 1 }}>Menu</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', width: '100%' }}>
@@ -767,10 +791,10 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
             <div style={{ marginTop: -8, marginBottom: 12, paddingLeft: 8 }}>
               <div style={{ color: '#8f9bb3', fontSize: 13, marginBottom: 4, marginLeft: 2 }}>Saved Stagings</div>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {sidebarStagings.length === 0 && (
+                {stagingNames.length === 0 && (
                   <li style={{ color: '#8f9bb3', fontSize: 13, padding: '6px 10px' }}>No stagings saved.</li>
                 )}
-                {sidebarStagings.map(name => (
+                {stagingNames.map(name => (
                   <li key={name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Link
                       to={`/app/staging`}
@@ -796,14 +820,18 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
                         setDeleteError("");
                         setDeletingStaging(name);
                         try {
-                          const resp = await fetch(`http://localhost:4000/staging/${name}`, { method: 'DELETE' });
+                          const resp = await api(`/staging/${name}`, { method: 'DELETE' });
                           if (!resp.ok) {
                             const data = await resp.json();
                             setDeleteError(data.error || 'Failed to delete.');
                           } else {
                             // Refresh stagings and tables
-                            fetch("http://localhost:4000/stagings").then(res => res.json()).then(data => window.setSidebarStagings && window.setSidebarStagings(data.stagings || []));
-                            fetch("http://localhost:4000/tables").then(res => res.json()).then(tableList => window.setTables && window.setTables(tableList));
+                            api("/stagings").then(async (res) => {
+                              const data = await res.json().catch(() => ({}));
+                              const list = res.ok && Array.isArray(data.stagings) ? data.stagings : [];
+                              if (window.setSidebarStagings) window.setSidebarStagings(list);
+                            });
+                            api("/tables").then(res => res.json()).then((body) => window.setTables && window.setTables(body));
                           }
                         } catch (err) {
                           setDeleteError(err.message || 'Failed to delete.');
@@ -876,10 +904,10 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
             <div style={{ marginTop: -8, marginBottom: 12, paddingLeft: 8 }}>
               <div style={{ color: '#8f9bb3', fontSize: 13, marginBottom: 4, marginLeft: 2 }}>Curated Models</div>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {curatedModels.length === 0 && (
+                {curatedNames.length === 0 && (
                   <li style={{ color: '#8f9bb3', fontSize: 13, padding: '6px 10px' }}>No curated models.</li>
                 )}
-                {curatedModels.map(name => (
+                {curatedNames.map(name => (
                   <li key={name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <button
                       style={{
@@ -978,10 +1006,10 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
             <div style={{ marginTop: -8, marginBottom: 12, paddingLeft: 8 }}>
               <div style={{ color: '#8f9bb3', fontSize: 13, marginBottom: 4, marginLeft: 2 }}>Mart Models</div>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {martsModels.length === 0 && (
+                {martNames.length === 0 && (
                   <li style={{ color: '#8f9bb3', fontSize: 13, padding: '6px 10px' }}>No mart models.</li>
                 )}
-                {martsModels.map(name => (
+                {martNames.map(name => (
                   <li key={name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <button
                       style={{
@@ -1047,6 +1075,33 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
             </div>
           )}
           <button
+            onClick={() => navigate('/app/ai')}
+            style={{
+              marginTop: 4,
+              background: 'linear-gradient(90deg, #6366f1 0%, #0ea5e9 100%)',
+              borderRadius: 8,
+              boxShadow: '0 1.5px 6px #0001',
+              padding: '10px 0',
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              border: '1.5px solid #4f46e5',
+              cursor: 'pointer',
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: 16,
+              letterSpacing: 1,
+              textShadow: '0 1px 4px #0001',
+              transition: 'box-shadow 0.2s, border 0.2s',
+              minWidth: 0,
+            }}
+            title="Open AI dashboard analysis"
+          >
+            AI Dashboard
+          </button>
+          <button
             onClick={() => navigate('/app/compare')}
             style={{
               marginTop: 4,
@@ -1083,9 +1138,9 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
               <button onClick={() => setShowCuratedPanel(false)} style={{ background: 'transparent', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 18 }}>✕</button>
             </div>
             <div style={{ padding: '14px 18px', overflowY: 'auto' }}>
-              {curatedModels.length === 0 && <div style={{ color: '#8f9bb3', fontSize: 14 }}>No curated models available.</div>}
+              {curatedNames.length === 0 && <div style={{ color: '#8f9bb3', fontSize: 14 }}>No curated models available.</div>}
               <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {curatedModels.map(name => (
+                {curatedNames.map(name => (
                   <li key={name}>
                     <button
                       style={{
@@ -1125,9 +1180,9 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
               <button onClick={() => setShowMartsPanel(false)} style={{ background: 'transparent', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 18 }}>✕</button>
             </div>
             <div style={{ padding: '14px 18px', overflowY: 'auto' }}>
-              {martsModels.length === 0 && <div style={{ color: '#8f9bb3', fontSize: 14 }}>No mart models available.</div>}
+              {martNames.length === 0 && <div style={{ color: '#8f9bb3', fontSize: 14 }}>No mart models available.</div>}
               <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {martsModels.map(name => (
+                {martNames.map(name => (
                   <li key={name}>
                     <button
                       style={{
@@ -1178,6 +1233,29 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
   const [dataRows, setDataRows] = React.useState([]);
   const [dataError, setDataError] = React.useState("");
   const [isLoadingData, setIsLoadingData] = React.useState(false);
+  const [availableTables, setAvailableTables] = React.useState([]);
+  const [aiSelectedTables, setAiSelectedTables] = React.useState([]);
+  const [aiCriteria, setAiCriteria] = React.useState('');
+  const [aiPrompt, setAiPrompt] = React.useState('');
+  const [aiSuggestions, setAiSuggestions] = React.useState([]);
+  const [aiLoading, setAiLoading] = React.useState(false);
+  const [aiError, setAiError] = React.useState('');
+  const [aiSource, setAiSource] = React.useState('');
+  const [aiHistory, setAiHistory] = React.useState([]);
+
+  React.useEffect(() => {
+    api('/tables')
+      .then((res) => res.json())
+      .then((tables) => {
+        const list = Array.isArray(tables) ? tables : [];
+        setAvailableTables(list);
+      })
+      .catch(() => setAvailableTables([]));
+    api('/ai/curated-history')
+      .then((res) => res.json())
+      .then((data) => setAiHistory(Array.isArray(data.entries) ? data.entries : []))
+      .catch(() => setAiHistory([]));
+  }, []);
 
   // Load a selected curated model
   React.useEffect(() => {
@@ -1191,11 +1269,11 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
       setSaveStatus("");
       return;
     }
-    fetch(`http://localhost:4000/curated-model/${selectedCurated}`)
+    api(`/curated-model/${selectedCurated}`)
       .then(res => res.json())
       .then(data => {
         setModelName(data.name);
-        setSqlInput(data.sql);
+        setSqlInput(data?.sql || "");
         setPreviewRows(data.preview || []);
         setDocumentation((data.documentation || []).map(col => ({
           ...col,
@@ -1220,7 +1298,7 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
     setDocumentation([]);
     setIsPreviewing(true);
     try {
-      const res = await fetch("http://localhost:4000/api/curated-preview", {
+      const res = await api("/api/curated-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: sqlInput })
@@ -1319,7 +1397,7 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
     setSaveStatus("");
     setIsSaving(true);
     try {
-      const res = await fetch("http://localhost:4000/curated-models", {
+      const res = await api("/curated-models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1338,9 +1416,12 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
         setSaveStatus("Curated model saved successfully!");
         setSelectedCurated(modelName);
         // Refresh curated models in sidebar
-        fetch("http://localhost:4000/curated-models").then(res => res.json()).then(data => setCuratedModels(data.models || []));
+        api("/curated-models").then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          setCuratedModels(res.ok && Array.isArray(data.models) ? data.models : []);
+        });
         // Refresh tables so curated tables become queryable by marts layer
-        fetch("http://localhost:4000/tables").then(res => res.json()).then(tableList => {
+        api("/tables").then(res => res.json()).then(tableList => {
           if (typeof window !== 'undefined' && window.setTables) {
             window.setTables(tableList);
           }
@@ -1361,7 +1442,7 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
       return;
     }
     try {
-      const response = await fetch(`http://localhost:4000/curated-model/${selectedCurated}/export?format=${format}`);
+      const response = await api(`/curated-model/${selectedCurated}/export?format=${format}`);
       if (!response.ok) {
         const errorData = await response.json();
         setSaveStatus(errorData.error || "Failed to download data.");
@@ -1392,7 +1473,7 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
     setDataError("");
     try {
       const limitParam = fullData ? 'all' : '1000';
-      const res = await fetch(`http://localhost:4000/curated-model/${selectedCurated}/data?limit=${limitParam}`);
+      const res = await api(`/curated-model/${selectedCurated}/data?limit=${limitParam}`);
       const data = await res.json();
       if (data.error) {
         setDataError(data.error);
@@ -1417,6 +1498,47 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
   }, [location.state, selectedCurated]);
 
   const showTableOnly = (location.state && location.state.loadCuratedData && dataRows.length > 0) || false;
+
+  const toggleAiTable = (tableName) => {
+    setAiSelectedTables((prev) => (
+      prev.includes(tableName) ? prev.filter((t) => t !== tableName) : [...prev, tableName]
+    ));
+  };
+
+  const handleGenerateAiSuggestions = async () => {
+    setAiError('');
+    setAiSuggestions([]);
+    setAiSource('');
+    if (aiSelectedTables.length === 0) {
+      setAiError('Избери поне една таблица за AI предложения.');
+      return;
+    }
+    setAiLoading(true);
+    try {
+      const res = await api('/ai/curated-suggestions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selectedTables: aiSelectedTables,
+          criteria: aiCriteria,
+          prompt: aiPrompt,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setAiError(data.error || 'Неуспешно генериране на AI предложения.');
+      } else {
+        setAiSource(data.source || '');
+        setAiSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+        const h = await api('/ai/curated-history').then((r) => r.json()).catch(() => ({ entries: [] }));
+        setAiHistory(Array.isArray(h.entries) ? h.entries : []);
+      }
+    } catch (err) {
+      setAiError(err.message || 'Неуспешно генериране на AI предложения.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   if (showTableOnly) {
     return (
@@ -1491,9 +1613,116 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
               <textarea
                 value={sqlInput}
                 onChange={e => setSqlInput(e.target.value)}
-                placeholder={"Write your SQL for the curated model here.\nExample: SELECT customer_id, COUNT(order_id) AS order_count FROM stg_order WHERE status = 'completed' GROUP BY customer_id;"}
+                placeholder="SQL за curated модел. Създава се от нулата — без шаблони; нужна е качена база за Preview/Save и обикновено вече дефинирани staging таблици."
                 style={{ width: '100%', minHeight: 120, fontSize: 15, padding: 8, borderRadius: 4, border: '1px solid #ccc', marginTop: 4 }}
               />
+            </div>
+            <div style={{ marginBottom: 20, background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 8, padding: 12 }}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>AI SQL Suggestions</div>
+              <div style={{ fontSize: 13, color: '#475569', marginBottom: 10 }}>
+                Избери таблици, добави критерии и prompt, после AI ще предложи заявки за Curated.
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Tables</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {availableTables.map((table) => (
+                    <label key={table} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#fff', padding: '6px 8px', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                      <input
+                        type="checkbox"
+                        checked={aiSelectedTables.includes(table)}
+                        onChange={() => toggleAiTable(table)}
+                      />
+                      <span style={{ fontSize: 13 }}>{table}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                <div>
+                  <label style={{ fontSize: 13, fontWeight: 600 }}>Criteria (SQL WHERE без "WHERE")</label>
+                  <input
+                    value={aiCriteria}
+                    onChange={(e) => setAiCriteria(e.target.value)}
+                    placeholder={`e.g. order_date >= '2025-01-01'`}
+                    style={{ width: '100%', marginTop: 4, padding: 8, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 13, fontWeight: 600 }}>Prompt</label>
+                  <input
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="e.g. focus on churn KPI and monthly trend"
+                    style={{ width: '100%', marginTop: 4, padding: 8, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerateAiSuggestions}
+                disabled={aiLoading}
+                style={{ padding: '8px 14px', border: 'none', borderRadius: 6, background: '#4338ca', color: '#fff', fontWeight: 700, cursor: aiLoading ? 'not-allowed' : 'pointer' }}
+              >
+                {aiLoading ? 'Генериране...' : 'Generate AI Suggestions'}
+              </button>
+              {aiError && <div style={{ marginTop: 8, color: '#b91c1c', fontSize: 13 }}>{aiError}</div>}
+              {aiSource && <div style={{ marginTop: 8, color: '#334155', fontSize: 12 }}>Suggestion source: {aiSource}</div>}
+              {aiSuggestions.length > 0 && (
+                <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {aiSuggestions.map((s, idx) => (
+                    <div key={`${s.title}-${idx}`} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 4 }}>{s.title}</div>
+                      <div style={{ color: '#475569', fontSize: 13, marginBottom: 8 }}>{s.rationale}</div>
+                      <textarea value={s.sql} readOnly style={{ width: '100%', minHeight: 90, fontFamily: 'monospace', fontSize: 12, border: '1px solid #e2e8f0', borderRadius: 6, padding: 8 }} />
+                      <div style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setSqlInput(s.sql);
+                            await api('/ai/curated-history/use', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ suggestionIndex: idx }),
+                            }).catch(() => null);
+                            const h = await api('/ai/curated-history').then((r) => r.json()).catch(() => ({ entries: [] }));
+                            setAiHistory(Array.isArray(h.entries) ? h.entries : []);
+                          }}
+                          style={{ padding: '6px 10px', border: 'none', borderRadius: 6, background: '#0ea5e9', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                        >
+                          Use in SQL editor
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {aiHistory.length > 0 && (
+                <div style={{ marginTop: 12, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>AI Suggestion History</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: 'left', padding: 6, borderBottom: '1px solid #e2e8f0' }}>Generated</th>
+                          <th style={{ textAlign: 'left', padding: 6, borderBottom: '1px solid #e2e8f0' }}>Source</th>
+                          <th style={{ textAlign: 'left', padding: 6, borderBottom: '1px solid #e2e8f0' }}>Tables</th>
+                          <th style={{ textAlign: 'left', padding: 6, borderBottom: '1px solid #e2e8f0' }}>Used</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {aiHistory.slice(0, 8).map((entry) => (
+                          <tr key={entry.id}>
+                            <td style={{ padding: 6, borderBottom: '1px solid #f1f5f9' }}>{entry.generatedAt ? new Date(entry.generatedAt).toLocaleString() : '-'}</td>
+                            <td style={{ padding: 6, borderBottom: '1px solid #f1f5f9' }}>{entry.source || '-'}</td>
+                            <td style={{ padding: 6, borderBottom: '1px solid #f1f5f9' }}>{(entry.selectedTables || []).join(', ')}</td>
+                            <td style={{ padding: 6, borderBottom: '1px solid #f1f5f9' }}>{entry.usedAt ? `yes (${entry.usedSuggestionIndex ?? 0})` : 'no'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
             <div style={{ marginBottom: 24 }}>
               <button
@@ -1714,11 +1943,11 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
       setSaveStatus("");
       return;
     }
-    fetch(`http://localhost:4000/mart/${selectedMart}`)
+    api(`/mart/${selectedMart}`)
       .then(res => res.json())
       .then(data => {
         setModelName(data.name);
-        setSqlInput(data.sql);
+        setSqlInput(data?.sql || "");
         setPreviewRows(data.preview || []);
         setDocumentation((data.documentation || []).map(col => ({
           ...col,
@@ -1743,7 +1972,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
     setDocumentation([]);
     setIsPreviewing(true);
     try {
-      const res = await fetch("http://localhost:4000/api/mart-preview", {
+      const res = await api("/api/mart-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: sqlInput })
@@ -1839,7 +2068,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
     setSaveStatus("");
     setIsSaving(true);
     try {
-      const res = await fetch("http://localhost:4000/marts", {
+      const res = await api("/marts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1858,7 +2087,10 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
         setSaveStatus("Mart model saved successfully!");
         setSelectedMart(modelName);
         // Refresh marts models in sidebar
-        fetch("http://localhost:4000/marts").then(res => res.json()).then(data => setMartsModels(data.models || []));
+        api("/marts").then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          setMartsModels(res.ok && Array.isArray(data.models) ? data.models : []);
+        });
       } else {
         setSaveStatus(data.error || "Failed to save mart model.");
       }
@@ -1875,7 +2107,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
       return;
     }
     try {
-      const response = await fetch(`http://localhost:4000/mart/${selectedMart}/export?format=${format}`);
+      const response = await api(`/mart/${selectedMart}/export?format=${format}`);
       if (!response.ok) {
         const errorData = await response.json();
         setSaveStatus(errorData.error || "Failed to download data.");
@@ -1906,7 +2138,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
     setDataError("");
     try {
       const limitParam = fullData ? 'all' : '1000';
-      const res = await fetch(`http://localhost:4000/mart/${selectedMart}/data?limit=${limitParam}`);
+      const res = await api(`/mart/${selectedMart}/data?limit=${limitParam}`);
       const data = await res.json();
       if (data.error) {
         setDataError(data.error);
@@ -2082,7 +2314,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
               <textarea
                 value={sqlInput}
                 onChange={e => setSqlInput(e.target.value)}
-                placeholder={"Write your SQL for the mart model here.\nExample: SELECT customer_id, SUM(total_sales) AS lifetime_value FROM curated_total_sales_by_customer GROUP BY customer_id;"}
+                placeholder="SQL за mart модел. Без готови примери — дефинирайте го вие; нужна е качена база за Preview/Save и curated слой според вашия pipeline."
                 style={{ width: '100%', minHeight: 120, fontSize: 15, padding: 8, borderRadius: 4, border: '1px solid #ccc', marginTop: 4 }}
               />
             </div>
@@ -2242,6 +2474,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
 
 // Performance comparison between raw SQL (source tables) and mart query
 function PerformanceCompare({ martsModels, selectedMart, setSelectedMart }) {
+  const martOptions = asStringArray(martsModels);
   const [rawSql, setRawSql] = React.useState("");
   const [rowLimit, setRowLimit] = React.useState(500);
   const [rawRows, setRawRows] = React.useState([]);
@@ -2259,7 +2492,7 @@ function PerformanceCompare({ martsModels, selectedMart, setSelectedMart }) {
       return;
     }
     setLoadingMartSql(true);
-    fetch(`http://localhost:4000/mart/${selectedMart}/source-sql`)
+    api(`/mart/${selectedMart}/source-sql`)
       .then(res => res.json())
       .then(data => {
         const sql = data.sourceSql || data.martSql || "";
@@ -2280,7 +2513,7 @@ function PerformanceCompare({ martsModels, selectedMart, setSelectedMart }) {
     setMartDuration(null);
     try {
       // Get preview rows for display
-      const rawRes = await fetch("http://localhost:4000/api/preview", {
+      const rawRes = await api("/api/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: rawSql, limit: rowLimit }),
@@ -2292,7 +2525,7 @@ function PerformanceCompare({ martsModels, selectedMart, setSelectedMart }) {
       setRawRows(rawData.preview || rawData.rows || []);
 
       // Fetch mart rows for display
-      const martRes = await fetch(`http://localhost:4000/mart/${selectedMart}/data?limit=${rowLimit || 500}`);
+      const martRes = await api(`/mart/${selectedMart}/data?limit=${rowLimit || 500}`);
       const martData = await martRes.json();
       if (!martRes.ok || martData.error) {
         throw new Error(martData.error || "Failed to fetch mart data");
@@ -2301,7 +2534,7 @@ function PerformanceCompare({ martsModels, selectedMart, setSelectedMart }) {
 
       // Server-side compare for reliable timings (warm-up + median)
       try {
-        const cmpRes = await fetch(`http://localhost:4000/mart/${selectedMart}/compare`, {
+        const cmpRes = await api(`/mart/${selectedMart}/compare`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sourceSql: rawSql, rowLimit: rowLimit, runs: 5 })
@@ -2368,7 +2601,7 @@ function PerformanceCompare({ martsModels, selectedMart, setSelectedMart }) {
               style={{ padding: 10, minWidth: 260, borderRadius: 8, border: '1px solid #cbd5e1', background: '#f8fafc' }}
             >
               <option value="">-- Select mart model --</option>
-              {martsModels.map(name => <option key={name} value={name}>{name}</option>)}
+              {martOptions.map(name => <option key={name} value={name}>{name}</option>)}
               </select>
             </div>
           <div style={{ marginBottom: 12 }}>
@@ -2449,48 +2682,76 @@ function App() {
   const [martsModels, setMartsModels] = useState([]); // List of marts model names
   const [selectedMart, setSelectedMart] = useState("");
 
-  useEffect(() => {
-    fetch("http://localhost:4000/tables")
-      .then(res => res.json())
-      .then(tableList => {
+  const loadAppData = useCallback(() => {
+    api("/tables")
+      .then(async (res) => {
+        const body = await res.json().catch(() => null);
+        const tableList = res.ok && Array.isArray(body) ? body : [];
         setTables(tableList);
-        // Auto-select 'data(1)' if it exists
-        if (tableList.includes('data(1)')) {
-          setSelectedTable('data(1)');
+        if (res.ok && Array.isArray(body)) {
+          setError('');
+          if (body.includes('data(1)')) {
+            setSelectedTable('data(1)');
+          }
+        } else if (body && body.error === 'NO_DATABASE') {
+          setError(body.message || 'Качете SQLite база данни от лентата с профила.');
+        } else if (!res.ok) {
+          setError('Could not fetch tables from backend.');
         }
       })
       .catch(() => setError("Could not fetch tables from backend."));
-    // Fetch stagings for sidebar
-    fetch("http://localhost:4000/stagings")
-      .then(res => res.json())
-      .then(data => setSidebarStagings(data.stagings || []))
+    api("/stagings")
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        const list = res.ok && Array.isArray(data.stagings) ? data.stagings : [];
+        setSidebarStagings(list);
+      })
       .catch(() => {
-        // Silently fail - backend might not be running yet
         setSidebarStagings([]);
       });
-    // Fetch curated models for sidebar
-    fetch("http://localhost:4000/curated-models")
-      .then(res => res.json())
-      .then(data => setCuratedModels(data.models || []))
+    api("/curated-models")
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        const list = res.ok && Array.isArray(data.models) ? data.models : [];
+        setCuratedModels(list);
+      })
       .catch(() => {
-        // Silently fail - backend might not be running yet
         setCuratedModels([]);
       });
-    // Fetch marts models for sidebar
-    fetch("http://localhost:4000/marts")
-      .then(res => res.json())
-      .then(data => setMartsModels(data.models || []))
+    api("/marts")
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        const list = res.ok && Array.isArray(data.models) ? data.models : [];
+        setMartsModels(list);
+      })
       .catch(() => {
-        // Silently fail - backend might not be running yet
         setMartsModels([]);
       });
   }, []);
 
   useEffect(() => {
+    loadAppData();
+    const onDbUploaded = () => loadAppData();
+    const onDbSlotChanged = () => {
+      setSelectedTable('');
+      setSelectedCurated('');
+      setSelectedMart('');
+      setTableData([]);
+      loadAppData();
+    };
+    window.addEventListener('dfs-db-uploaded', onDbUploaded);
+    window.addEventListener('dfs-db-slot-changed', onDbSlotChanged);
+    return () => {
+      window.removeEventListener('dfs-db-uploaded', onDbUploaded);
+      window.removeEventListener('dfs-db-slot-changed', onDbSlotChanged);
+    };
+  }, [loadAppData]);
+
+  useEffect(() => {
     if (!selectedTable) return;
     setLoading(true);
     setError("");
-    fetch(`http://localhost:4000/table/${selectedTable}`)
+    api(`/table/${selectedTable}`)
       .then(res => res.json())
       .then(data => {
         // Backend returns an object: { data: [...rows], pagination: {...} }
@@ -2504,15 +2765,15 @@ function App() {
       });
   }, [selectedTable]);
 
-  // In App component, expose setTables globally for Staging to use
+  // In App component, expose setTables globally for Staging to use (always coerce to array)
   useEffect(() => {
-    window.setTables = setTables;
+    window.setTables = (list) => setTables(asStringArray(list));
     return () => { delete window.setTables; };
   }, [setTables]);
 
   // In App component, expose setSidebarStagings globally for sidebar delete to use
   useEffect(() => {
-    window.setSidebarStagings = setSidebarStagings;
+    window.setSidebarStagings = (list) => setSidebarStagings(asStringArray(list));
     return () => { delete window.setSidebarStagings; };
   }, [setSidebarStagings]);
 
@@ -2520,8 +2781,12 @@ function App() {
     <Router>
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
         <Route path="/app/*" element={
+          <RequireAuth>
           <>
+            <AppUserBar />
             <SidebarNavWrapper
               tables={tables}
               selectedTable={selectedTable}
@@ -2538,47 +2803,26 @@ function App() {
               <Routes>
                 <Route index element={
                   <div style={{ padding: 40 }}>
-                    <header style={{ marginBottom: 32 }}>
-                      <h1 style={{ fontSize: 32, color: '#222b45', margin: 0 }}>SQLite Database Viewer</h1>
-                      <p style={{ color: '#8f9bb3', marginTop: 8 }}>Select a table from the sidebar to view its data.</p>
-                    </header>
-                    {error && <div style={{ color: 'red', marginBottom: 16 }}>{error}</div>}
+                    <UiPageHeader
+                      title="SQLite Database Viewer"
+                      subtitle="Select a table from the sidebar to view its data."
+                    />
+                    {error && <UiBanner tone="error">{error}</UiBanner>}
                     {!selectedTable && (
-                      <div style={{ color: '#8f9bb3', fontSize: 18, marginTop: 80, textAlign: 'center' }}>
-                        <span>Click a table name on the left to view its data.</span>
-                      </div>
+                      <UiEmptyState>Click a table name on the left to view its data.</UiEmptyState>
                     )}
                     {selectedTable && (
                       <>
-                        <div style={{ marginBottom: 24, background: '#fff', borderRadius: 8, boxShadow: '0 2px 8px #0001', padding: 20, display: 'inline-block' }}>
+                        <UiCard style={{ marginBottom: 24, padding: 20, display: 'inline-block' }}>
                           <h2 style={{ margin: 0, color: '#00b887', fontSize: 22 }}>{selectedTable}</h2>
                           <span style={{ color: '#8f9bb3', fontSize: 14 }}>Rows: {tableData.length}</span>
-                        </div>
+                        </UiCard>
                         {loading && <p>Loading table data...</p>}
                         {!loading && tableData.length === 0 && (
-                          <p style={{ color: '#8f9bb3' }}>No data in this table.</p>
+                          <UiEmptyState>No data in this table.</UiEmptyState>
                         )}
                         {tableData.length > 0 && (
-                          <div style={{ overflow: 'auto', maxHeight: 600, background: '#fff', borderRadius: 8, boxShadow: '0 2px 8px #0001', padding: 10 }}>
-                            <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
-                              <thead>
-                                <tr>
-                                  {Object.keys(tableData[0] || {}).map(key => (
-                                    <th key={key} style={{ background: '#f7fafc', color: '#222b45', padding: '4px 6px', borderBottom: '2px solid #e4e9f2', position: 'sticky', top: 0, fontWeight: 600 }}>{key}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {tableData.map((row, idx) => (
-                                  <tr key={idx} style={{ background: idx % 2 === 0 ? '#f7fafc' : '#fff', height: 28 }}>
-                                    {Object.values(row).map((val, i) => (
-                                      <td key={i} style={{ padding: '4px 6px', borderBottom: '1px solid #e4e9f2', color: '#333', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(val)}</td>
-                                    ))}
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
+                          <UiDataTable rows={tableData} />
                         )}
                       </>
                     )}
@@ -2587,11 +2831,13 @@ function App() {
                 <Route path="staging" element={<Staging />} />
                 <Route path="curated" element={<CuratedModel curatedModels={curatedModels} setCuratedModels={setCuratedModels} selectedCurated={selectedCurated} setSelectedCurated={setSelectedCurated} />} />
                 <Route path="marts" element={<MartModel martsModels={martsModels} setMartsModels={setMartsModels} selectedMart={selectedMart} setSelectedMart={setSelectedMart} />} />
+                <Route path="ai" element={<AIDashboard />} />
                 <Route path="compare" element={<PerformanceCompare martsModels={martsModels} selectedMart={selectedMart} setSelectedMart={setSelectedMart} />} />
                 {/* Optionally, add /curated/:name route for direct linking */}
               </Routes>
             </main>
           </>
+          </RequireAuth>
         } />
       </Routes>
     </Router>

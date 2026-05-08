@@ -4,52 +4,156 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
+const multer = require('multer');
+const workspace = require('./workspace');
+const auth = require('./auth');
 
 const app = express();
 const PORT = 4000;
-// This backend serves data only from the Northwind sample database.
-const DB_PATH = path.join(__dirname, '../northwind_small.sqlite');
 const FULL_CHART_ROWS = process.env.FULL_CHART_ROWS ? Number(process.env.FULL_CHART_ROWS) : 10000;
-const METADATA_DIR = path.join(__dirname, '../models/staging/metadata');
-const CURATED_DIR = path.join(__dirname, '../models/curated');
-const CURATED_META_DIR = path.join(CURATED_DIR, 'metadata');
-const MARTS_DIR = path.join(__dirname, '../models/marts');
-const MARTS_META_DIR = path.join(MARTS_DIR, 'metadata');
-const PERF_DIR = path.join(__dirname, '../models/curated/metadata/performance');
-fs.mkdirSync(METADATA_DIR, { recursive: true });
-fs.mkdirSync(CURATED_META_DIR, { recursive: true });
-fs.mkdirSync(MARTS_META_DIR, { recursive: true });
-fs.mkdirSync(PERF_DIR, { recursive: true });
 
-// Persistent database connection for better performance
-const db = new sqlite3.Database(DB_PATH);
-// Enable WAL mode for better concurrent access
-db.run('PRAGMA journal_mode = WAL');
-// Enable query optimization
-db.run('PRAGMA synchronous = NORMAL');
-db.run('PRAGMA cache_size = 10000');
+auth.initAuthDb();
+
+const uploadTmp = path.join(__dirname, 'data', 'tmp');
+fs.mkdirSync(uploadTmp, { recursive: true });
+const upload = multer({ dest: uploadTmp, limits: { fileSize: 120 * 1024 * 1024 } });
 
 app.use(cors());
 app.use(express.json());
-app.use('/performance-reports', express.static(PERF_DIR));
 
-// Close database on shutdown
-process.on('SIGINT', () => {
-  db.close(() => {
-    process.exit(0);
+function publicAuthPath(req) {
+  return req.path === '/auth/register' || req.path === '/auth/login';
+}
+
+function resolveDbSlot(req) {
+  const rawSlot = req.headers['x-database-slot'] || req.query.dbSlot || 'db1';
+  return workspace.normalizeDbSlot(String(rawSlot));
+}
+
+app.post('/auth/register', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    const user = await auth.createUser(email, password);
+    workspace.ensureUserWorkspaces(user.id);
+    const token = auth.signToken(user);
+    res.json({ token, user: { id: user.id, email: user.email } });
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE')) {
+      return res.status(409).json({ error: 'Email already registered' });
+    }
+    res.status(500).json({ error: e.message || 'Registration failed' });
+  }
+});
+
+app.post('/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    const user = await auth.verifyLogin(email, password);
+    if (!user) return res.status(401).json({ error: 'Invalid email or password' });
+    workspace.ensureUserWorkspaces(user.id);
+    const token = auth.signToken(user);
+    res.json({ token, user: { id: user.id, email: user.email } });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Login failed' });
+  }
+});
+
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS' || publicAuthPath(req)) return next();
+  return auth.authMiddleware(req, res, (err) => {
+    if (err) return next(err);
+    req.dbSlot = resolveDbSlot(req);
+    workspace.ensureNewUserWorkspace(req.user.id, req.dbSlot);
+    next();
   });
+});
+
+app.get('/auth/me', (req, res) => {
+  const dbSlots = workspace.DB_SLOTS.reduce((acc, slot) => {
+    acc[slot] = { hasDatabase: workspace.userHasDatabase(req.user.id, slot) };
+    return acc;
+  }, {});
+  res.json({
+    user: req.user,
+    dbSlots,
+    activeDbSlot: req.dbSlot,
+    hasDatabase: workspace.userHasDatabase(req.user.id, req.dbSlot),
+  });
+});
+
+function requireUploadedSqlite(req, res, next) {
+  if (!workspace.userHasDatabase(req.user.id, req.dbSlot)) {
+    return res.status(400).json({
+      error: 'NO_DATABASE',
+      message: `Качете SQLite файл (.sqlite или .db) за ${req.dbSlot.toUpperCase()} от профила, за да работите с данни.`,
+    });
+  }
+  next();
+}
+
+/** Metadata / file-only endpoints: empty workspace until the user creates models (no sample data). */
+function canUseAppWithoutDatabase(req) {
+  const m = req.method;
+  const p = req.path;
+  if (m === 'GET' && p === '/stagings') return true;
+  if (m === 'GET' && /^\/staging\/[^/]+$/.test(p)) return true;
+  if (m === 'GET' && p === '/curated-models') return true;
+  if (m === 'GET' && /^\/curated-model\/[^/]+$/.test(p)) return true;
+  if (m === 'GET' && p === '/marts') return true;
+  if (m === 'GET' && /^\/mart\/[^/]+$/.test(p)) return true;
+  if (m === 'GET' && /^\/mart\/[^/]+\/source-sql$/.test(p)) return true;
+  if (m === 'POST' && (p === '/generate-staging-model' || p === '/generate-user-model')) return true;
+  return false;
+}
+
+app.post('/auth/upload-database/:slot?', upload.single('database'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: database)' });
+  const slot = workspace.normalizeDbSlot(req.params.slot || req.dbSlot || 'db1');
+  const ext = path.extname(req.file.originalname || '').toLowerCase();
+  if (!['.sqlite', '.db', '.sqlite3'].includes(ext)) {
+    try { fs.unlinkSync(req.file.path); } catch (e) { /* ignore */ }
+    return res.status(400).json({ error: 'Only SQLite files (.sqlite, .db) are allowed' });
+  }
+  try {
+    workspace.ensureNewUserWorkspace(req.user.id, slot);
+    workspace.resetUserModels(req.user.id, slot);
+    const dest = workspace.userDbPath(req.user.id, slot);
+    fs.copyFileSync(req.file.path, dest);
+    try { fs.unlinkSync(req.file.path); } catch (e) { /* ignore */ }
+    res.json({ success: true, slot, path: 'database.sqlite' });
+  } catch (e) {
+    try { fs.unlinkSync(req.file.path); } catch (err) { /* ignore */ }
+    res.status(500).json({ error: e.message || 'Upload failed' });
+  }
+});
+
+app.use((req, res, next) => {
+  if (canUseAppWithoutDatabase(req)) return next();
+  return requireUploadedSqlite(req, res, next);
+});
+
+app.use('/performance-reports', (req, res, next) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
+  express.static(d.PERF_DIR)(req, res, next);
+});
+
+process.on('SIGINT', () => {
+  process.exit(0);
 });
 
 // In-memory caching for frequently accessed data
 const dataCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-function getCacheKey(type, name) {
-  return `${type}:${name}`;
+function getCacheKey(userId, type, name) {
+  return `${userId}:${type}:${name}`;
 }
 
-function getCachedData(type, name) {
-  const key = getCacheKey(type, name);
+function getCachedData(userId, type, name) {
+  const key = getCacheKey(userId, type, name);
   const cached = dataCache.get(key);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return cached.data;
@@ -58,8 +162,8 @@ function getCachedData(type, name) {
   return null;
 }
 
-function setCachedData(type, name, data) {
-  const key = getCacheKey(type, name);
+function setCachedData(userId, type, name, data) {
+  const key = getCacheKey(userId, type, name);
   dataCache.set(key, { data, timestamp: Date.now() });
   // Clean up cache if it grows too large
   if (dataCache.size > 100) {
@@ -68,8 +172,8 @@ function setCachedData(type, name, data) {
   }
 }
 
-function invalidateCache(type, name) {
-  const key = getCacheKey(type, name);
+function invalidateCache(userId, type, name) {
+  const key = getCacheKey(userId, type, name);
   dataCache.delete(key);
 }
 
@@ -98,7 +202,9 @@ function closeClients(job) {
 
 function savePerfArtifacts(job, finalSample) {
   try {
-    const outJsonPath = path.join(PERF_DIR, `${job.runId}.json`);
+    const perfDir = job.perfDir;
+    fs.mkdirSync(perfDir, { recursive: true });
+    const outJsonPath = path.join(perfDir, `${job.runId}.json`);
     // Attach paths later as well to ensure metadata includes report link
     const baseMeta = { ...job.meta };
 
@@ -174,7 +280,7 @@ function savePerfArtifacts(job, finalSample) {
 </body>
 </html>`;
 
-    const outHtmlPath = path.join(PERF_DIR, `${job.runId}.html`);
+    const outHtmlPath = path.join(perfDir, `${job.runId}.html`);
     fs.writeFileSync(outHtmlPath, html);
     const enrichedMeta = { ...baseMeta, reportPath: path.basename(outHtmlPath), jsonPath: path.basename(outJsonPath) };
     fs.writeFileSync(outJsonPath, JSON.stringify({ ...enrichedMeta, final: finalSample, samples: job.samples }, null, 2));
@@ -185,9 +291,12 @@ function savePerfArtifacts(job, finalSample) {
   }
 }
 
-async function runPerfJob({ runId, mode, sql, curatedName, rowLimit = FULL_CHART_ROWS }) {
+async function runPerfJob({ runId, mode, sql, curatedName, rowLimit = FULL_CHART_ROWS, userId, dbPath, perfDir }) {
   const job = {
     runId,
+    userId,
+    dbPath,
+    perfDir,
     mode,
     meta: {
       runId,
@@ -227,10 +336,12 @@ async function runPerfJob({ runId, mode, sql, curatedName, rowLimit = FULL_CHART
     pushSample('running');
   }, 400);
 
+  const sqldb = new sqlite3.Database(dbPath);
+  job.db = sqldb;
   try {
     const finalSql = ensureLimit(sql, rowLimit);
     await new Promise((resolve, reject) => {
-      db.all(finalSql, (err, rows) => {
+      sqldb.all(finalSql, (err, rows) => {
         if (err) return reject(err);
         rowsProcessed = rows.length;
         resolve();
@@ -258,6 +369,10 @@ async function runPerfJob({ runId, mode, sql, curatedName, rowLimit = FULL_CHART
     closeClients(job);
   } finally {
     clearInterval(sampler);
+    try {
+      sqldb.close();
+    } catch (e) { /* ignore */ }
+    job.db = null;
   }
   return job;
 }
@@ -271,47 +386,521 @@ function toSnakeCase(str) {
 }
 
 function detectType(values) {
+  if (!Array.isArray(values) || values.length === 0) return 'string';
   // Try to detect if all values are numbers or dates
   if (values.every(v => v === null || v === '' || !isNaN(Number(v)))) return 'number';
   if (values.every(v => v === null || v === '' || !isNaN(Date.parse(v)))) return 'date';
   return 'string';
 }
 
+function safeSqlIdentifier(name) {
+  return `"${String(name || '').replace(/"/g, '""')}"`;
+}
+
+function buildCuratedSuggestions({ selectedTables, tableColumnsByTable, prompt = '', criteria = '' }) {
+  const normalizedTables = Array.isArray(selectedTables) ? selectedTables.filter(Boolean) : [];
+  if (normalizedTables.length === 0) return [];
+
+  const baseTable = normalizedTables[0];
+  const baseColumns = tableColumnsByTable[baseTable] || [];
+  const numericColumn = baseColumns.find((c) => /int|real|num|decimal|double|float|amount|price|qty|count/i.test(c.type || '') || /amount|price|qty|count|total|sum|value/i.test(c.name || ''));
+  const dateColumn = baseColumns.find((c) => /date|time/i.test(c.type || '') || /date|time|created|updated|month|year/i.test(c.name || ''));
+  const dimensionColumn = baseColumns.find((c) => c.name !== numericColumn?.name && c.name !== dateColumn?.name) || baseColumns[0];
+
+  const criteriaWhere = criteria && criteria.trim() ? `\nWHERE ${criteria.trim()}` : '';
+  const promptComment = prompt && prompt.trim() ? `-- User intent: ${prompt.trim()}\n` : '';
+  const tableRef = safeSqlIdentifier(baseTable);
+  const dimRef = dimensionColumn ? safeSqlIdentifier(dimensionColumn.name) : null;
+  const numRef = numericColumn ? safeSqlIdentifier(numericColumn.name) : null;
+  const dateRef = dateColumn ? safeSqlIdentifier(dateColumn.name) : null;
+
+  const suggestions = [];
+
+  if (dimRef) {
+    suggestions.push({
+      title: 'Distribution by key dimension',
+      rationale: `Good first curated view for table "${baseTable}" with grouped counts by ${dimensionColumn.name}.`,
+      sql: `${promptComment}SELECT\n  ${dimRef} AS dimension_value,\n  COUNT(*) AS row_count\nFROM ${tableRef}${criteriaWhere}\nGROUP BY ${dimRef}\nORDER BY row_count DESC\nLIMIT 100;`,
+    });
+  }
+
+  if (dateRef) {
+    suggestions.push({
+      title: 'Trend over time',
+      rationale: `Tracks volume trend by ${dateColumn.name} for table "${baseTable}".`,
+      sql: `${promptComment}SELECT\n  DATE(${dateRef}) AS day,\n  COUNT(*) AS row_count${numRef ? `,\n  SUM(COALESCE(${numRef}, 0)) AS total_value` : ''}\nFROM ${tableRef}${criteriaWhere}\nGROUP BY DATE(${dateRef})\nORDER BY day DESC\nLIMIT 365;`,
+    });
+  }
+
+  if (numRef) {
+    suggestions.push({
+      title: 'Numeric KPI summary',
+      rationale: `Provides essential aggregates for ${numericColumn.name} from "${baseTable}".`,
+      sql: `${promptComment}SELECT\n  COUNT(*) AS total_rows,\n  SUM(COALESCE(${numRef}, 0)) AS total_${numericColumn.name},\n  AVG(COALESCE(${numRef}, 0)) AS avg_${numericColumn.name},\n  MIN(${numRef}) AS min_${numericColumn.name},\n  MAX(${numRef}) AS max_${numericColumn.name}\nFROM ${tableRef}${criteriaWhere};`,
+    });
+  }
+
+  return suggestions.slice(0, 3);
+}
+
+function aiArtifactsDir(userId, dbSlot) {
+  return path.join(workspace.workspaceRoot(userId, dbSlot), 'ai');
+}
+
+function ensureAiArtifactsDir(userId, dbSlot) {
+  const dir = aiArtifactsDir(userId, dbSlot);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function analysisHistoryPath(userId, dbSlot) {
+  return path.join(ensureAiArtifactsDir(userId, dbSlot), 'analysis-history.json');
+}
+
+function curatedHistoryPath(userId, dbSlot) {
+  return path.join(ensureAiArtifactsDir(userId, dbSlot), 'curated-suggestions-history.json');
+}
+
+function readJsonArray(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function writeJsonArray(filePath, value) {
+  fs.writeFileSync(filePath, JSON.stringify(value, null, 2), 'utf8');
+}
+
+function appendHistoryEntry(filePath, entry, limit = 50) {
+  const existing = readJsonArray(filePath);
+  existing.unshift(entry);
+  writeJsonArray(filePath, existing.slice(0, limit));
+}
+
+function extractImportantCharacteristics(analysis) {
+  const topTable = analysis?.largestTables?.[0];
+  const topRisk = analysis?.qualityRisks?.[0];
+  const topNumeric = analysis?.numericHighlights?.[0];
+  return {
+    topTable: topTable ? { table: topTable.table, rowCount: topTable.rowCount } : null,
+    topRisk: topRisk ? { severity: topRisk.severity, title: topRisk.title } : null,
+    topNumeric: topNumeric ? { table: topNumeric.table, column: topNumeric.column, p90: topNumeric.p90 } : null,
+  };
+}
+
+async function generateCuratedSuggestionsWithLLM({ selectedTables, tableColumnsByTable, criteria, prompt }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const schemaContext = selectedTables.map((t) => ({
+    table: t,
+    columns: tableColumnsByTable[t] || [],
+  }));
+  const userPrompt = [
+    'Generate exactly 3 SQLite SELECT suggestions for curated models.',
+    'Return JSON array only. Each item must have: title, rationale, sql.',
+    'Do not include markdown or explanations outside JSON.',
+    `Selected tables: ${JSON.stringify(schemaContext)}`,
+    `Criteria: ${criteria || ''}`,
+    `User prompt: ${prompt || ''}`,
+  ].join('\n');
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: 'You are an expert analytics engineer generating safe SQLite SELECT queries.' },
+        { role: 'user', content: userPrompt },
+      ],
+    }),
+  });
+
+  if (!response.ok) return null;
+  const payload = await response.json();
+  const content = payload?.choices?.[0]?.message?.content || '';
+  try {
+    const parsed = JSON.parse(content);
+    if (!Array.isArray(parsed)) return null;
+    const normalized = parsed
+      .filter((s) => s && s.title && s.sql)
+      .map((s) => ({
+        title: String(s.title),
+        rationale: String(s.rationale || 'AI-generated suggestion'),
+        sql: String(s.sql),
+      }))
+      .slice(0, 3);
+    return normalized.length ? normalized : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function parseJsonSafe(content) {
+  try {
+    return { value: JSON.parse(content), error: null };
+  } catch (err) {
+    return { value: null, error: err };
+  }
+}
+
+function parseLimitQueryParam(rawLimit, defaultLimit = 1000) {
+  if (rawLimit === 'all') return null;
+  const parsed = Number(rawLimit ?? defaultLimit);
+  if (!Number.isFinite(parsed) || parsed <= 0) return defaultLimit;
+  return Math.floor(parsed);
+}
+
+function percentile(values, p) {
+  if (!Array.isArray(values) || values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor((p / 100) * (sorted.length - 1))));
+  return sorted[idx];
+}
+
+function toCardinalityLabel(ratio) {
+  if (ratio >= 0.95) return 'very_high';
+  if (ratio >= 0.5) return 'high';
+  if (ratio >= 0.15) return 'medium';
+  return 'low';
+}
+
+function calcNumericStats(values) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return { count: 0, min: null, max: null, avg: null, p50: null, p90: null };
+  }
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  return {
+    count: values.length,
+    min,
+    max,
+    avg,
+    p50: percentile(values, 50),
+    p90: percentile(values, 90),
+  };
+}
+
 // List all tables in the SQLite database
 app.get('/tables', (req, res) => {
-  db.all(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`, (err, rows) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
+  const ldb = new sqlite3.Database(d.dbPath);
+  ldb.all(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`, (err, rows) => {
+    ldb.close();
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows.map(row => row.name));
   });
 });
 
+app.get('/ai/database-analysis', async (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
+  const ldb = new sqlite3.Database(d.dbPath);
+  try {
+    const tables = await new Promise((resolve, reject) => {
+      ldb.all(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`, (err, rows) => {
+        if (err) return reject(err);
+        resolve((rows || []).map((row) => row.name));
+      });
+    });
+
+    const tableProfiles = [];
+    for (const tableName of tables) {
+      const rowCount = await new Promise((resolve, reject) => {
+        ldb.get(`SELECT COUNT(*) AS c FROM "${tableName}"`, (err, row) => {
+          if (err) return reject(err);
+          resolve(row?.c || 0);
+        });
+      });
+
+      const schemaRows = await new Promise((resolve, reject) => {
+        ldb.all(`PRAGMA table_info("${tableName}")`, (err, rows) => {
+          if (err) return reject(err);
+          resolve(rows || []);
+        });
+      });
+
+      const columns = [];
+      for (const col of schemaRows) {
+        const colName = col.name;
+        const sampled = await new Promise((resolve, reject) => {
+          ldb.all(`SELECT "${colName}" AS v FROM "${tableName}" LIMIT 1000`, (err, rows) => {
+            if (err) return reject(err);
+            resolve((rows || []).map((r) => r.v));
+          });
+        });
+
+        const nonNull = sampled.filter((v) => v !== null && v !== '');
+        const nulls = sampled.length - nonNull.length;
+        const distinct = new Set(nonNull.map((v) => String(v))).size;
+        const numericValues = nonNull
+          .map((v) => Number(v))
+          .filter((v) => Number.isFinite(v));
+        const numericRatio = nonNull.length ? (numericValues.length / nonNull.length) : 0;
+        const isNumeric = numericRatio >= 0.8;
+
+        columns.push({
+          name: colName,
+          declaredType: col.type || '',
+          sampleSize: sampled.length,
+          nullRatio: sampled.length ? (nulls / sampled.length) : 0,
+          distinctRatio: nonNull.length ? (distinct / nonNull.length) : 0,
+          cardinality: toCardinalityLabel(nonNull.length ? (distinct / nonNull.length) : 0),
+          inferredType: isNumeric ? 'number' : detectType(nonNull.slice(0, 100)),
+          numericStats: isNumeric ? calcNumericStats(numericValues) : null,
+        });
+      }
+
+      tableProfiles.push({
+        table: tableName,
+        rowCount,
+        columnCount: columns.length,
+        columns,
+      });
+    }
+
+    const totalRows = tableProfiles.reduce((sum, t) => sum + t.rowCount, 0);
+    const totalColumns = tableProfiles.reduce((sum, t) => sum + t.columnCount, 0);
+    const largestTables = [...tableProfiles]
+      .sort((a, b) => b.rowCount - a.rowCount)
+      .slice(0, 5)
+      .map((t) => ({ table: t.table, rowCount: t.rowCount, columnCount: t.columnCount }));
+
+    const qualityRisks = [];
+    tableProfiles.forEach((table) => {
+      table.columns.forEach((col) => {
+        if (col.sampleSize >= 50 && col.nullRatio > 0.4) {
+          qualityRisks.push({
+            severity: col.nullRatio > 0.7 ? 'high' : 'medium',
+            title: `High null ratio in ${table.table}.${col.name}`,
+            detail: `~${Math.round(col.nullRatio * 100)}% null/empty in sample.`,
+          });
+        }
+      });
+    });
+
+    const numericHighlights = [];
+    tableProfiles.forEach((table) => {
+      table.columns
+        .filter((c) => c.numericStats && c.numericStats.count > 0)
+        .sort((a, b) => (b.numericStats?.p90 || 0) - (a.numericStats?.p90 || 0))
+        .slice(0, 2)
+        .forEach((c) => {
+          numericHighlights.push({
+            table: table.table,
+            column: c.name,
+            p50: c.numericStats.p50,
+            p90: c.numericStats.p90,
+            min: c.numericStats.min,
+            max: c.numericStats.max,
+          });
+        });
+    });
+
+    const aiInsights = [];
+    if (largestTables[0]) {
+      aiInsights.push({
+        kind: 'focus_table',
+        title: `Focus first on "${largestTables[0].table}"`,
+        explanation: `It has the largest volume (${largestTables[0].rowCount} rows), so optimizing this table will likely have the biggest impact.`,
+      });
+    }
+    if (qualityRisks.length > 0) {
+      aiInsights.push({
+        kind: 'data_quality',
+        title: 'Data quality risks detected',
+        explanation: `${qualityRisks.length} column(s) show high null ratios in sampled data.`,
+      });
+    }
+    if (numericHighlights.length > 0) {
+      const top = numericHighlights[0];
+      aiInsights.push({
+        kind: 'numeric_distribution',
+        title: `Numeric spread insight for ${top.table}.${top.column}`,
+        explanation: `Median ${top.p50}, P90 ${top.p90}, range [${top.min}, ${top.max}] in sampled rows.`,
+      });
+    }
+    if (tableProfiles.length > 8) {
+      aiInsights.push({
+        kind: 'modeling_strategy',
+        title: 'Recommended modeling strategy',
+        explanation: 'Create curated intermediate models by domain first, then marts, to keep complexity manageable.',
+      });
+    }
+
+    const result = {
+      generatedAt: new Date().toISOString(),
+      summary: {
+        tables: tableProfiles.length,
+        totalRows,
+        totalColumns,
+      },
+      largestTables,
+      qualityRisks: qualityRisks.slice(0, 15),
+      numericHighlights: numericHighlights.slice(0, 20),
+      aiInsights,
+      tableProfiles,
+    };
+
+    const historyFile = analysisHistoryPath(req.user.id, req.dbSlot);
+    appendHistoryEntry(historyFile, {
+      id: randomUUID(),
+      generatedAt: result.generatedAt,
+      summary: result.summary,
+      importantCharacteristics: extractImportantCharacteristics(result),
+    }, 100);
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to analyze database' });
+  } finally {
+    ldb.close();
+  }
+});
+
+app.post('/ai/curated-suggestions', async (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
+  const { selectedTables = [], criteria = '', prompt = '' } = req.body || {};
+  if (!Array.isArray(selectedTables) || selectedTables.length === 0) {
+    return res.status(400).json({ error: 'selectedTables is required' });
+  }
+  const ldb = new sqlite3.Database(d.dbPath);
+  try {
+    const availableTables = await new Promise((resolve, reject) => {
+      ldb.all(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`, (err, rows) => {
+        if (err) return reject(err);
+        resolve((rows || []).map((r) => r.name));
+      });
+    });
+    const validTables = selectedTables.filter((t) => availableTables.includes(t));
+    if (validTables.length === 0) {
+      return res.status(400).json({ error: 'No valid selected tables found in the active database' });
+    }
+
+    const tableColumnsByTable = {};
+    for (const table of validTables) {
+      const cols = await new Promise((resolve, reject) => {
+        ldb.all(`PRAGMA table_info(${safeSqlIdentifier(table)})`, (err, rows) => {
+          if (err) return reject(err);
+          resolve(rows || []);
+        });
+      });
+      tableColumnsByTable[table] = cols.map((c) => ({ name: c.name, type: c.type || '' }));
+    }
+
+    let suggestions = await generateCuratedSuggestionsWithLLM({
+      selectedTables: validTables,
+      tableColumnsByTable,
+      prompt,
+      criteria,
+    });
+    let source = 'llm';
+    if (!suggestions || suggestions.length === 0) {
+      suggestions = buildCuratedSuggestions({
+        selectedTables: validTables,
+        tableColumnsByTable,
+        prompt,
+        criteria,
+      });
+      source = 'rule-based';
+    }
+
+    appendHistoryEntry(curatedHistoryPath(req.user.id, req.dbSlot), {
+      id: randomUUID(),
+      generatedAt: new Date().toISOString(),
+      source,
+      selectedTables: validTables,
+      criteria,
+      prompt,
+      suggestions,
+      usedSuggestionIndex: null,
+    }, 200);
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      dbSlot: req.dbSlot,
+      source,
+      selectedTables: validTables,
+      suggestions,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to generate curated suggestions' });
+  } finally {
+    ldb.close();
+  }
+});
+
+app.get('/ai/analysis-history', (req, res) => {
+  const history = readJsonArray(analysisHistoryPath(req.user.id, req.dbSlot));
+  res.json({ snapshots: history.slice(0, 20) });
+});
+
+app.get('/ai/curated-history', (req, res) => {
+  const history = readJsonArray(curatedHistoryPath(req.user.id, req.dbSlot));
+  res.json({ entries: history.slice(0, 40) });
+});
+
+app.post('/ai/curated-history/use', (req, res) => {
+  const { historyId, suggestionIndex } = req.body || {};
+  if (!historyId && suggestionIndex === undefined) {
+    return res.status(400).json({ error: 'historyId or suggestionIndex is required' });
+  }
+  const filePath = curatedHistoryPath(req.user.id, req.dbSlot);
+  const entries = readJsonArray(filePath);
+  if (!entries.length) return res.status(404).json({ error: 'No curated AI history found' });
+
+  const targetIdx = historyId
+    ? entries.findIndex((e) => e.id === historyId)
+    : 0;
+  if (targetIdx < 0) return res.status(404).json({ error: 'History entry not found' });
+  entries[targetIdx] = {
+    ...entries[targetIdx],
+    usedSuggestionIndex: Number.isFinite(Number(suggestionIndex)) ? Number(suggestionIndex) : 0,
+    usedAt: new Date().toISOString(),
+  };
+  writeJsonArray(filePath, entries);
+  res.json({ success: true });
+});
+
 // Get all data from a specific table with pagination and caching
 app.get('/table/:name', (req, res) => {
+  const uid = req.user.id;
+  const cacheUid = `${uid}:${req.dbSlot}`;
+  const d = workspace.dirs(uid, req.dbSlot);
+  const ldb = new sqlite3.Database(d.dbPath);
   const tableName = req.params.name;
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(500, parseInt(req.query.limit) || 100); // Max 500 per page
   const offset = (page - 1) * limit;
 
-  // Check cache for full table info
-  const cacheKey = `table:${tableName}:count`;
-  let countResult = getCachedData('table', `${tableName}:count`);
-  
+  let countResult = getCachedData(cacheUid, 'table', `${tableName}:count`);
+
   Promise.all([
     new Promise((resolve, reject) => {
       if (countResult !== null) {
         resolve(countResult);
       } else {
-        db.get(`SELECT COUNT(*) as count FROM "${tableName}"`, (err, row) => {
+        ldb.get(`SELECT COUNT(*) as count FROM "${tableName}"`, (err, row) => {
           if (err) reject(err);
           else {
-            setCachedData('table', `${tableName}:count`, row.count);
+            setCachedData(cacheUid, 'table', `${tableName}:count`, row.count);
             resolve(row.count);
           }
         });
       }
     }),
     new Promise((resolve, reject) => {
-      db.all(`SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset}`, (err, rows) => {
+      ldb.all(`SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset}`, (err, rows) => {
         if (err) reject(err);
         else resolve(rows || []);
       });
@@ -328,14 +917,19 @@ app.get('/table/:name', (req, res) => {
     });
   }).catch(err => {
     res.status(500).json({ error: err.message });
+  }).finally(() => {
+    try {
+      ldb.close();
+    } catch (e) { /* ignore */ }
   });
 });
 
 // Save generated staging model SQL
 app.post('/generate-staging-model', (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const { table, sql } = req.body;
   if (!table || !sql) return res.status(400).json({ error: 'Missing table or sql' });
-  const filePath = path.join(__dirname, '../models/staging', `stg_${table}.sql`);
+  const filePath = path.join(d.modelsStaging, `stg_${table}.sql`);
   fs.writeFile(filePath, sql, err => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ success: true, file: filePath });
@@ -343,10 +937,11 @@ app.post('/generate-staging-model', (req, res) => {
 });
 
 app.post('/generate-user-model', (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const { name, sql } = req.body;
   if (!name || !sql) return res.status(400).json({ error: 'Missing name or sql' });
-  const filePath = path.join(__dirname, '../models/marts', `${name}.sql`);
-  fs.mkdir(path.join(__dirname, '../models/marts'), { recursive: true }, (err) => {
+  const filePath = path.join(d.MARTS_DIR, `${name}.sql`);
+  fs.mkdir(d.MARTS_DIR, { recursive: true }, (err) => {
     if (err) return res.status(500).json({ error: err.message });
     fs.writeFile(filePath, sql, err => {
       if (err) return res.status(500).json({ error: err.message });
@@ -357,6 +952,7 @@ app.post('/generate-user-model', (req, res) => {
 
 // Preview custom staging SQL (returns up to 100 rows)
 app.post('/preview-staging-sql', (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const { sql } = req.body;
   if (!sql) return res.status(400).json({ error: 'Missing SQL' });
   let previewSQL = sql.trim();
@@ -364,7 +960,9 @@ app.post('/preview-staging-sql', (req, res) => {
   if (!/limit\s+\d+/i.test(previewSQL)) {
     previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
   }
-  db.all(previewSQL, (err, rows) => {
+  const ldb = new sqlite3.Database(d.dbPath);
+  ldb.all(previewSQL, (err, rows) => {
+    ldb.close();
     if (err) return res.status(400).json({ error: err.message });
     res.json({ rows });
   });
@@ -372,6 +970,7 @@ app.post('/preview-staging-sql', (req, res) => {
 
 // Auto-documentation preview endpoint
 app.post('/api/preview', async (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const { sql } = req.body;
   if (!sql) return res.status(400).json({ error: 'Missing SQL' });
   let previewSQL = sql.trim();
@@ -379,8 +978,12 @@ app.post('/api/preview', async (req, res) => {
     previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
   }
   try {
+    const ldb = new sqlite3.Database(d.dbPath);
     const preview = await new Promise((resolve, reject) => {
-      db.all(previewSQL, (err, rows) => err ? reject(err) : resolve(rows));
+      ldb.all(previewSQL, (err, rows) => {
+        ldb.close();
+        return err ? reject(err) : resolve(rows);
+      });
     });
     let columns = [];
     if (preview.length > 0) {
@@ -407,47 +1010,68 @@ app.post('/api/preview', async (req, res) => {
 
 // List all saved stagings
 app.get('/stagings', (req, res) => {
-  fs.readdir(METADATA_DIR, (err, files) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
+  const cleanedAt = workspace.getLayersCleanupTimestamp(req.user.id, req.dbSlot);
+  fs.readdir(d.METADATA_DIR, (err, files) => {
     if (err) return res.status(500).json({ error: err.message });
-    const names = files.filter(f => f.endsWith('.json')).map(f => f.replace(/\.json$/, ''));
+    const names = files
+      .filter(f => f.endsWith('.json'))
+      .filter((f) => {
+        if (!cleanedAt) return true;
+        try {
+          const stat = fs.statSync(path.join(d.METADATA_DIR, f));
+          return stat.mtimeMs >= cleanedAt;
+        } catch (e) {
+          return false;
+        }
+      })
+      .map(f => f.replace(/\.json$/, ''));
     res.json({ stagings: names });
   });
 });
 
 // Get a specific staging (SQL, doc, preview) - with caching
 app.get('/staging/:name', (req, res) => {
+  const uid = req.user.id;
+  const cacheUid = `${uid}:${req.dbSlot}`;
+  const d = workspace.dirs(uid, req.dbSlot);
   const stagingName = req.params.name;
-  
-  // Check cache first
-  const cached = getCachedData('staging', stagingName);
+
+  const cached = getCachedData(cacheUid, 'staging', stagingName);
   if (cached) {
     return res.json(cached);
   }
 
-  const metaPath = path.join(METADATA_DIR, `${stagingName}.json`);
+  const metaPath = path.join(d.METADATA_DIR, `${stagingName}.json`);
   fs.readFile(metaPath, 'utf8', (err, data) => {
     if (err) return res.status(404).json({ error: 'Staging not found' });
-    const staging = JSON.parse(data);
-    // Cache for 5 minutes
-    setCachedData('staging', stagingName, staging);
+    const parsed = parseJsonSafe(data);
+    if (parsed.error) {
+      return res.status(500).json({ error: 'Invalid staging metadata format' });
+    }
+    const staging = parsed.value;
+    setCachedData(cacheUid, 'staging', stagingName, staging);
     res.json(staging);
   });
 });
 
 // Delete a saved staging (metadata, SQL file, and drop table)
 app.delete('/staging/:name', (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const name = req.params.name;
-  const metaPath = path.join(METADATA_DIR, `${name}.json`);
-  const sqlPath = path.join(__dirname, '../models/staging', `${name}.sql`);
+  const metaPath = path.join(d.METADATA_DIR, `${name}.json`);
+  const sqlPath = path.join(d.modelsStaging, `${name}.sql`);
   let errors = [];
+  const cacheUid = `${req.user.id}:${req.dbSlot}`;
+  invalidateCache(cacheUid, 'staging', name);
+  invalidateCache(cacheUid, 'table', `${name}:count`);
   // Delete metadata JSON
   try { fs.unlinkSync(metaPath); } catch (e) { errors.push(e.message); }
   // Delete SQL file
   try { fs.unlinkSync(sqlPath); } catch (e) { errors.push(e.message); }
-  // Drop table from SQLite database
-  const db = new sqlite3.Database(DB_PATH);
-  db.run(`DROP TABLE IF EXISTS "${name}"`, (err) => {
-    db.close();
+  const ldb = new sqlite3.Database(d.dbPath);
+  ldb.run(`DROP TABLE IF EXISTS "${name}"`, (err) => {
+    ldb.close();
     if (err) errors.push(err.message);
     if (errors.length > 0) {
       return res.status(500).json({ error: 'Failed to delete some files or table', details: errors });
@@ -481,9 +1105,10 @@ function generateDbtYaml({ name, description, columns }) {
 
 // Save custom staging SQL as dbt model and with metadata
 app.post('/save-staging-sql', (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const { name, sql, dialect = 'sqlite', createTable, documentation, tableDescription, yaml } = req.body;
   if (!name || !sql) return res.status(400).json({ error: 'Missing name or SQL' });
-  const filePath = path.join(__dirname, '../models/staging', `${name}.sql`);
+  const filePath = path.join(d.modelsStaging, `${name}.sql`);
   fs.writeFile(filePath, sql, async err => {
     if (err) return res.status(500).json({ error: err.message });
     let preview = [];
@@ -496,7 +1121,7 @@ app.post('/save-staging-sql', (req, res) => {
     if (!/limit\s+\d+/i.test(previewSQL)) {
       previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
     }
-    const db = new sqlite3.Database(DB_PATH);
+    const db = new sqlite3.Database(d.dbPath);
     try {
       preview = await new Promise((resolve, reject) => {
         db.all(previewSQL, (err, rows) => err ? reject(err) : resolve(rows));
@@ -584,8 +1209,11 @@ app.post('/save-staging-sql', (req, res) => {
       preview,
       timestamp: new Date().toISOString()
     };
-    fs.writeFile(path.join(METADATA_DIR, `${name}.json`), JSON.stringify(meta, null, 2), err => {
+    fs.writeFile(path.join(d.METADATA_DIR, `${name}.json`), JSON.stringify(meta, null, 2), err => {
       if (err) return res.status(500).json({ error: err.message });
+      const cacheUid = `${req.user.id}:${req.dbSlot}`;
+      invalidateCache(cacheUid, 'staging', name);
+      invalidateCache(cacheUid, 'table', `${name}:count`);
       res.json({ success: true, file: filePath, tableCreated, tableError, meta });
     });
   });
@@ -593,7 +1221,8 @@ app.post('/save-staging-sql', (req, res) => {
 
 // Endpoint to drop all staged tables (names starting with 'stg_')
 app.post('/drop-staged-tables', (req, res) => {
-  const db = new sqlite3.Database(DB_PATH);
+  const d = workspace.dirs(req.user.id, req.dbSlot);
+  const db = new sqlite3.Database(d.dbPath);
   db.all(`SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'stg_%'`, (err, rows) => {
     if (err) {
       db.close();
@@ -625,12 +1254,13 @@ app.post('/drop-staged-tables', (req, res) => {
 
 // Download entire staged table as CSV
 app.get('/download-staged/:name', (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const tableName = req.params.name;
   // Only allow staged tables
   if (!tableName.startsWith('stg_')) {
     return res.status(400).json({ error: 'Not a staged table' });
   }
-  const db = new sqlite3.Database(DB_PATH);
+  const db = new sqlite3.Database(d.dbPath);
   db.all(`SELECT * FROM "${tableName}"`, (err, rows) => {
     db.close();
     if (err) return res.status(500).json({ error: err.message });
@@ -658,38 +1288,59 @@ app.get('/download-staged/:name', (req, res) => {
 
 // List all curated models
 app.get('/curated-models', (req, res) => {
-  fs.readdir(CURATED_META_DIR, (err, files) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
+  const cleanedAt = workspace.getLayersCleanupTimestamp(req.user.id, req.dbSlot);
+  fs.readdir(d.CURATED_META_DIR, (err, files) => {
     if (err) return res.status(500).json({ error: err.message });
-    const names = files.filter(f => f.endsWith('.json')).map(f => f.replace(/\.json$/, ''));
+    const names = files
+      .filter(f => f.endsWith('.json'))
+      .filter((f) => {
+        if (!cleanedAt) return true;
+        try {
+          const stat = fs.statSync(path.join(d.CURATED_META_DIR, f));
+          return stat.mtimeMs >= cleanedAt;
+        } catch (e) {
+          return false;
+        }
+      })
+      .map(f => f.replace(/\.json$/, ''));
     res.json({ models: names });
   });
 });
 
 // Get a specific curated model (SQL, doc, preview) - with caching
 app.get('/curated-model/:name', (req, res) => {
+  const uid = req.user.id;
+  const cacheUid = `${uid}:${req.dbSlot}`;
+  const d = workspace.dirs(uid, req.dbSlot);
   const modelName = req.params.name;
-  
-  // Check cache first
-  const cached = getCachedData('curated-model', modelName);
+
+  const cached = getCachedData(cacheUid, 'curated-model', modelName);
   if (cached) {
     return res.json(cached);
   }
 
-  const metaPath = path.join(CURATED_META_DIR, `${modelName}.json`);
+  const metaPath = path.join(d.CURATED_META_DIR, `${modelName}.json`);
   fs.readFile(metaPath, 'utf8', (err, data) => {
     if (err) return res.status(404).json({ error: 'Curated model not found' });
-    const model = JSON.parse(data);
-    // Cache for 5 minutes
-    setCachedData('curated-model', modelName, model);
+    const parsed = parseJsonSafe(data);
+    if (parsed.error) {
+      return res.status(500).json({ error: 'Invalid curated model metadata format' });
+    }
+    const model = parsed.value;
+    setCachedData(cacheUid, 'curated-model', modelName, model);
     res.json(model);
   });
 });
 
 // Save or update a curated model
 app.post('/curated-models', async (req, res) => {
+  const uid = req.user.id;
+  const cacheUid = `${uid}:${req.dbSlot}`;
+  const d = workspace.dirs(uid, req.dbSlot);
   const { name, sql, documentation, tableDescription, createTable = true } = req.body;
   if (!name || !sql) return res.status(400).json({ error: 'Missing name or SQL' });
-  const filePath = path.join(CURATED_DIR, `${name}.sql`);
+  const filePath = path.join(d.CURATED_DIR, `${name}.sql`);
   fs.writeFileSync(filePath, sql);
   // Preview and doc generation if not provided
   let preview = [];
@@ -698,7 +1349,7 @@ app.post('/curated-models', async (req, res) => {
   if (!/limit\s+\d+/i.test(previewSQL)) {
     previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
   }
-  const db = new sqlite3.Database(DB_PATH);
+  const db = new sqlite3.Database(d.dbPath);
   let tableCreated = false;
   let tableError = null;
   try {
@@ -789,22 +1440,22 @@ app.post('/curated-models', async (req, res) => {
     preview,
     timestamp: new Date().toISOString()
   };
-  fs.writeFileSync(path.join(CURATED_META_DIR, `${name}.json`), JSON.stringify(meta, null, 2));
-  // Invalidate cache for this model
-  invalidateCache('curated-model', name);
-  invalidateCache('table', `${name}:count`);
+  fs.writeFileSync(path.join(d.CURATED_META_DIR, `${name}.json`), JSON.stringify(meta, null, 2));
+  invalidateCache(cacheUid, 'curated-model', name);
+  invalidateCache(cacheUid, 'table', `${name}:count`);
   res.json({ success: true, file: filePath, meta, tableCreated, tableError });
 });
 
 // Preview custom curated SQL (returns up to 100 rows and docs)
 app.post('/api/curated-preview', async (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const { sql } = req.body;
   if (!sql) return res.status(400).json({ error: 'Missing SQL' });
   let previewSQL = sql.trim();
   if (!/limit\s+\d+/i.test(previewSQL)) {
     previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
   }
-  const db = new sqlite3.Database(DB_PATH);
+  const db = new sqlite3.Database(d.dbPath);
   try {
     const preview = await new Promise((resolve, reject) => {
       db.all(previewSQL, (err, rows) => err ? reject(err) : resolve(rows));
@@ -834,25 +1485,12 @@ app.post('/api/curated-preview', async (req, res) => {
   }
 });
 
-
-
-// Serve curated model metadata with charts path
-app.get('/curated-model/:name', (req, res) => {
-  const metaPath = path.join(CURATED_META_DIR, `${req.params.name}.json`);
-  fs.readFile(metaPath, 'utf8', (err, data) => {
-    if (err) return res.status(404).json({ error: 'Curated model not found' });
-    res.json(JSON.parse(data));
-  });
-});
-
-
-
 // Fetch curated model data rows (for table view)
 app.get('/curated-model/:name/data', async (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const name = req.params.name;
-  const metaPath = path.join(CURATED_META_DIR, `${name}.json`);
-  const rawLimit = req.query.limit;
-  const limit = rawLimit === 'all' ? null : Number(rawLimit || 1000);
+  const metaPath = path.join(d.CURATED_META_DIR, `${name}.json`);
+  const limit = parseLimitQueryParam(req.query.limit, 1000);
 
   try {
     const metaData = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
@@ -861,7 +1499,7 @@ app.get('/curated-model/:name/data', async (req, res) => {
       return res.status(400).json({ error: 'No SQL query found for this model' });
     }
 
-    const db = new sqlite3.Database(DB_PATH);
+    const db = new sqlite3.Database(d.dbPath);
     let finalSQL = sql.trim();
     if (limit && !/limit\s+\d+/i.test(finalSQL)) {
       finalSQL = finalSQL.replace(/;*\s*$/, '') + ` LIMIT ${limit}`;
@@ -879,20 +1517,20 @@ app.get('/curated-model/:name/data', async (req, res) => {
 
 // Export curated model query results as CSV or JSON
 app.get('/curated-model/:name/export', async (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const name = req.params.name;
   const format = req.query.format || 'csv'; // csv or json
-  const metaPath = path.join(CURATED_META_DIR, `${name}.json`);
-  
+  const metaPath = path.join(d.CURATED_META_DIR, `${name}.json`);
+
   try {
     const metaData = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     const sql = metaData.sql;
-    
+
     if (!sql) {
       return res.status(400).json({ error: 'No SQL query found for this model' });
     }
-    
-    // Execute the full query (no limit for export)
-    const db = new sqlite3.Database(DB_PATH);
+
+    const db = new sqlite3.Database(d.dbPath);
     const rows = await new Promise((resolve, reject) => {
       db.all(sql.trim(), (err, rows) => err ? reject(err) : resolve(rows));
     });
@@ -935,12 +1573,12 @@ app.get('/curated-model/:name/export', async (req, res) => {
   }
 });
 
-function inlineCuratedIntoMartSql(sql) {
+function inlineCuratedIntoMartSql(sql, curatedMetaDir) {
   if (!sql) return '';
   let finalSql = sql;
   let curatedFiles = [];
   try {
-    curatedFiles = fs.readdirSync(CURATED_META_DIR).filter(f => f.endsWith('.json'));
+    curatedFiles = fs.readdirSync(curatedMetaDir).filter(f => f.endsWith('.json'));
   } catch (e) {
     return finalSql;
   }
@@ -949,7 +1587,7 @@ function inlineCuratedIntoMartSql(sql) {
   curatedFiles.forEach(file => {
     const name = file.replace(/\.json$/, '');
     try {
-      const meta = JSON.parse(fs.readFileSync(path.join(CURATED_META_DIR, file), 'utf8'));
+      const meta = JSON.parse(fs.readFileSync(path.join(curatedMetaDir, file), 'utf8'));
       if (meta.sql) curatedMap.set(name, meta.sql.trim().replace(/;+\s*$/, ''));
     } catch (e) {
       /* ignore */
@@ -986,12 +1624,16 @@ function inlineCuratedIntoMartSql(sql) {
 }
 
 // Execute a SQL query with limit enforcement and measure elapsed time
-async function runTimedQuery(sql, limit = FULL_CHART_ROWS) {
+async function runTimedQuery(dbPath, sql, limit = FULL_CHART_ROWS) {
   if (!sql) throw new Error('Missing SQL');
   const finalSQL = ensureLimit(sql, limit);
   const start = process.hrtime.bigint();
+  const ldb = new sqlite3.Database(dbPath);
   const rows = await new Promise((resolve, reject) => {
-    db.all(finalSQL, (err, rows) => err ? reject(err) : resolve(rows));
+    ldb.all(finalSQL, (err, r) => {
+      ldb.close();
+      return err ? reject(err) : resolve(r);
+    });
   });
   const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
   return { rows, elapsedMs };
@@ -1000,29 +1642,48 @@ async function runTimedQuery(sql, limit = FULL_CHART_ROWS) {
 // --- Marts layer endpoints ---
 // List all marts models
 app.get('/marts', (req, res) => {
-  fs.readdir(MARTS_META_DIR, (err, files) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
+  const cleanedAt = workspace.getLayersCleanupTimestamp(req.user.id, req.dbSlot);
+  fs.readdir(d.MARTS_META_DIR, (err, files) => {
     if (err) return res.status(500).json({ error: err.message });
-    const names = files.filter(f => f.endsWith('.json')).map(f => f.replace(/\.json$/, ''));
+    const names = files
+      .filter(f => f.endsWith('.json'))
+      .filter((f) => {
+        if (!cleanedAt) return true;
+        try {
+          const stat = fs.statSync(path.join(d.MARTS_META_DIR, f));
+          return stat.mtimeMs >= cleanedAt;
+        } catch (e) {
+          return false;
+        }
+      })
+      .map(f => f.replace(/\.json$/, ''));
     res.json({ models: names });
   });
 });
 
 // Get a specific mart model (SQL, doc, preview)
 app.get('/mart/:name', (req, res) => {
-  const metaPath = path.join(MARTS_META_DIR, `${req.params.name}.json`);
+  const d = workspace.dirs(req.user.id, req.dbSlot);
+  const metaPath = path.join(d.MARTS_META_DIR, `${req.params.name}.json`);
   fs.readFile(metaPath, 'utf8', (err, data) => {
     if (err) return res.status(404).json({ error: 'Mart model not found' });
-    res.json(JSON.parse(data));
+    const parsed = parseJsonSafe(data);
+    if (parsed.error) {
+      return res.status(500).json({ error: 'Invalid mart model metadata format' });
+    }
+    res.json(parsed.value);
   });
 });
 
 // Get mart SQL plus source-based SQL (curated inlined to their definitions)
 app.get('/mart/:name/source-sql', (req, res) => {
-  const metaPath = path.join(MARTS_META_DIR, `${req.params.name}.json`);
+  const d = workspace.dirs(req.user.id, req.dbSlot);
+  const metaPath = path.join(d.MARTS_META_DIR, `${req.params.name}.json`);
   try {
     const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     const martSql = meta.sql || '';
-    const sourceSql = inlineCuratedIntoMartSql(martSql);
+    const sourceSql = inlineCuratedIntoMartSql(martSql, d.CURATED_META_DIR);
     res.json({ martSql, sourceSql });
   } catch (err) {
     res.status(404).json({ error: 'Mart model not found' });
@@ -1031,8 +1692,9 @@ app.get('/mart/:name/source-sql', (req, res) => {
 
 // Compare a user-provided source SQL against a mart by executing both and timing
 app.post('/mart/:name/compare', async (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const { sourceSql, rowLimit = 1000, runs = 5 } = req.body || {};
-  const metaPath = path.join(MARTS_META_DIR, `${req.params.name}.json`);
+  const metaPath = path.join(d.MARTS_META_DIR, `${req.params.name}.json`);
   try {
     if (!sourceSql) return res.status(400).json({ error: 'Missing sourceSql' });
 
@@ -1040,12 +1702,12 @@ app.post('/mart/:name/compare', async (req, res) => {
     const srcLower = String(sourceSql).toLowerCase();
     const badNames = [];
     try {
-      const curatedFiles = fs.readdirSync(CURATED_META_DIR).filter(f => f.endsWith('.json'));
+      const curatedFiles = fs.readdirSync(d.CURATED_META_DIR).filter(f => f.endsWith('.json'));
       curatedFiles.forEach(f => {
         const n = f.replace(/\.json$/, '').toLowerCase();
         if (srcLower.includes(n)) badNames.push(n);
       });
-      const martFiles = fs.readdirSync(MARTS_META_DIR).filter(f => f.endsWith('.json'));
+      const martFiles = fs.readdirSync(d.MARTS_META_DIR).filter(f => f.endsWith('.json'));
       martFiles.forEach(f => {
         const n = f.replace(/\.json$/, '').toLowerCase();
         if (srcLower.includes(n)) badNames.push(n);
@@ -1073,15 +1735,15 @@ app.post('/mart/:name/compare', async (req, res) => {
 
     // Warm-up: run each query once to populate caches / JIT and then ignore
     try {
-      await runTimedQuery(sourceSql, rowLimit);
+      await runTimedQuery(d.dbPath, sourceSql, rowLimit);
     } catch (e) { /* ignore warm-up errors */ }
     try {
-      await runTimedQuery(martSql, rowLimit);
+      await runTimedQuery(d.dbPath, martSql, rowLimit);
     } catch (e) { /* ignore warm-up errors */ }
 
     for (let i = 0; i < runsClamped; i++) {
-      const rawRes = await runTimedQuery(sourceSql, rowLimit);
-      const martRes = await runTimedQuery(martSql, rowLimit);
+      const rawRes = await runTimedQuery(d.dbPath, sourceSql, rowLimit);
+      const martRes = await runTimedQuery(d.dbPath, martSql, rowLimit);
       rawTimes.push(rawRes.elapsedMs);
       martTimes.push(martRes.elapsedMs);
       if (i === 0) {
@@ -1174,9 +1836,10 @@ app.post('/mart/:name/compare', async (req, res) => {
 
 // Save or update a mart model
 app.post('/marts', async (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const { name, sql, documentation, tableDescription } = req.body;
   if (!name || !sql) return res.status(400).json({ error: 'Missing name or SQL' });
-  const filePath = path.join(MARTS_DIR, `${name}.sql`);
+  const filePath = path.join(d.MARTS_DIR, `${name}.sql`);
   fs.writeFileSync(filePath, sql);
   // Preview and doc generation if not provided
   let preview = [];
@@ -1185,7 +1848,7 @@ app.post('/marts', async (req, res) => {
   if (!/limit\s+\d+/i.test(previewSQL)) {
     previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
   }
-  const db = new sqlite3.Database(DB_PATH);
+  const db = new sqlite3.Database(d.dbPath);
   try {
     preview = await new Promise((resolve, reject) => {
       db.all(previewSQL, (err, rows) => err ? reject(err) : resolve(rows));
@@ -1257,12 +1920,13 @@ app.post('/marts', async (req, res) => {
     preview,
     timestamp: new Date().toISOString()
   };
-  fs.writeFileSync(path.join(MARTS_META_DIR, `${name}.json`), JSON.stringify(meta, null, 2));
+  fs.writeFileSync(path.join(d.MARTS_META_DIR, `${name}.json`), JSON.stringify(meta, null, 2));
   res.json({ success: true, file: filePath, meta });
 });
 
 // Preview custom mart SQL (returns up to 100 rows and docs)
 app.post('/api/mart-preview', async (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const { sql } = req.body;
   if (!sql) return res.status(400).json({ error: 'Missing SQL' });
   let previewSQL = sql.trim();
@@ -1270,8 +1934,12 @@ app.post('/api/mart-preview', async (req, res) => {
     previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
   }
   try {
+    const ldb = new sqlite3.Database(d.dbPath);
     const preview = await new Promise((resolve, reject) => {
-      db.all(previewSQL, (err, rows) => err ? reject(err) : resolve(rows));
+      ldb.all(previewSQL, (err, rows) => {
+        ldb.close();
+        return err ? reject(err) : resolve(rows);
+      });
     });
     let columns = [];
     if (preview.length > 0) {
@@ -1298,10 +1966,10 @@ app.post('/api/mart-preview', async (req, res) => {
 
 // Fetch mart model data rows (for table view)
 app.get('/mart/:name/data', async (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const name = req.params.name;
-  const metaPath = path.join(MARTS_META_DIR, `${name}.json`);
-  const rawLimit = req.query.limit;
-  const limit = rawLimit === 'all' ? null : Number(rawLimit || 1000);
+  const metaPath = path.join(d.MARTS_META_DIR, `${name}.json`);
+  const limit = parseLimitQueryParam(req.query.limit, 1000);
 
   try {
     const metaData = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
@@ -1314,8 +1982,12 @@ app.get('/mart/:name/data', async (req, res) => {
     if (limit && !/limit\s+\d+/i.test(finalSQL)) {
       finalSQL = finalSQL.replace(/;*\s*$/, '') + ` LIMIT ${limit}`;
     }
+    const ldb = new sqlite3.Database(d.dbPath);
     const rows = await new Promise((resolve, reject) => {
-      db.all(finalSQL, (err, rows) => err ? reject(err) : resolve(rows));
+      ldb.all(finalSQL, (err, r) => {
+        ldb.close();
+        return err ? reject(err) : resolve(r);
+      });
     });
     res.json({ rows, limit });
   } catch (err) {
@@ -1326,20 +1998,20 @@ app.get('/mart/:name/data', async (req, res) => {
 
 // Export mart model query results as CSV or JSON
 app.get('/mart/:name/export', async (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const name = req.params.name;
   const format = req.query.format || 'csv'; // csv or json
-  const metaPath = path.join(MARTS_META_DIR, `${name}.json`);
-  
+  const metaPath = path.join(d.MARTS_META_DIR, `${name}.json`);
+
   try {
     const metaData = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     const sql = metaData.sql;
-    
+
     if (!sql) {
       return res.status(400).json({ error: 'No SQL query found for this model' });
     }
-    
-    // Execute the full query (no limit for export)
-    const db = new sqlite3.Database(DB_PATH);
+
+    const db = new sqlite3.Database(d.dbPath);
     const rows = await new Promise((resolve, reject) => {
       db.all(sql.trim(), (err, rows) => err ? reject(err) : resolve(rows));
     });
@@ -1386,9 +2058,18 @@ app.get('/mart/:name/export', async (req, res) => {
 // --- Performance comparison endpoints ---
 app.post('/api/execute/manual', async (req, res) => {
   try {
+    const d = workspace.dirs(req.user.id, req.dbSlot);
     const { sql, rowLimit = FULL_CHART_ROWS, runId = randomUUID() } = req.body || {};
     if (!sql) return res.status(400).json({ error: 'Missing sql' });
-    runPerfJob({ runId, mode: 'manual', sql, rowLimit });
+    runPerfJob({
+      runId,
+      mode: 'manual',
+      sql,
+      rowLimit,
+      userId: req.user.id,
+      dbPath: d.dbPath,
+      perfDir: d.PERF_DIR,
+    });
     res.json({ runId, streamUrl: `/api/perf/${runId}/stream` });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1397,12 +2078,22 @@ app.post('/api/execute/manual', async (req, res) => {
 
 app.post('/api/execute/dataflow', async (req, res) => {
   try {
+    const d = workspace.dirs(req.user.id, req.dbSlot);
     const { curatedName, rowLimit = FULL_CHART_ROWS, runId = randomUUID() } = req.body || {};
     if (!curatedName) return res.status(400).json({ error: 'Missing curatedName' });
-    const sqlPath = path.join(CURATED_DIR, `${curatedName}.sql`);
+    const sqlPath = path.join(d.CURATED_DIR, `${curatedName}.sql`);
     if (!fs.existsSync(sqlPath)) return res.status(404).json({ error: 'Curated SQL not found' });
     const sql = fs.readFileSync(sqlPath, 'utf8');
-    runPerfJob({ runId, mode: 'dataflow', sql, curatedName, rowLimit });
+    runPerfJob({
+      runId,
+      mode: 'dataflow',
+      sql,
+      curatedName,
+      rowLimit,
+      userId: req.user.id,
+      dbPath: d.dbPath,
+      perfDir: d.PERF_DIR,
+    });
     res.json({ runId, streamUrl: `/api/perf/${runId}/stream` });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1415,6 +2106,9 @@ app.get('/api/perf/:runId/stream', (req, res) => {
   const job = perfJobs.get(runId);
   if (!job) {
     return res.status(404).json({ error: 'Run not found' });
+  }
+  if (job.userId !== req.user.id) {
+    return res.status(403).json({ error: 'Forbidden' });
   }
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -1438,19 +2132,30 @@ app.post('/api/perf/:runId/cancel', (req, res) => {
   const { runId } = req.params;
   const job = perfJobs.get(runId);
   if (!job) return res.status(404).json({ error: 'Run not found' });
+  if (job.userId !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+  if (job.status !== 'running') {
+    return res.status(409).json({ error: `Run is already ${job.status}` });
+  }
   job.cancelRequested = true;
-  job.status = 'cancelled';
-  res.json({ cancelled: true });
+  if (job.db && typeof job.db.interrupt === 'function') {
+    try {
+      job.db.interrupt();
+    } catch (e) {
+      // Ignore interrupt errors; run loop will handle completion/error state.
+    }
+  }
+  res.json({ cancelRequested: true });
 });
 
 // Final perf JSON
 app.get('/api/perf/:runId', (req, res) => {
+  const d = workspace.dirs(req.user.id, req.dbSlot);
   const { runId } = req.params;
   const inMem = perfJobs.get(runId);
-  if (inMem && inMem.meta && inMem.samples.length > 0) {
+  if (inMem && inMem.userId === req.user.id && inMem.meta && inMem.samples.length > 0) {
     return res.json({ meta: inMem.meta, samples: inMem.samples, final: inMem.samples[inMem.samples.length - 1] });
   }
-  const jsonPath = path.join(PERF_DIR, `${runId}.json`);
+  const jsonPath = path.join(d.PERF_DIR, `${runId}.json`);
   if (!fs.existsSync(jsonPath)) return res.status(404).json({ error: 'Perf run not found' });
   const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
   res.json(data);
@@ -1458,9 +2163,15 @@ app.get('/api/perf/:runId', (req, res) => {
 
 // List perf runs
 app.get('/api/perf/list', (req, res) => {
-  const files = fs.readdirSync(PERF_DIR).filter(f => f.endsWith('.json'));
+  const d = workspace.dirs(req.user.id, req.dbSlot);
+  let files = [];
+  try {
+    files = fs.readdirSync(d.PERF_DIR).filter(f => f.endsWith('.json'));
+  } catch (e) {
+    files = [];
+  }
   const runs = files.map(f => {
-    const data = JSON.parse(fs.readFileSync(path.join(PERF_DIR, f), 'utf8'));
+    const data = JSON.parse(fs.readFileSync(path.join(d.PERF_DIR, f), 'utf8'));
     return {
       runId: data.runId || f.replace(/\.json$/, ''),
       mode: data.mode,
