@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
@@ -109,7 +110,7 @@ function canUseAppWithoutDatabase(req) {
   return false;
 }
 
-app.post('/auth/upload-database/:slot?', upload.single('database'), (req, res) => {
+function uploadDatabaseHandler(req, res) {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: database)' });
   const slot = workspace.normalizeDbSlot(req.params.slot || req.dbSlot || 'db1');
   const ext = path.extname(req.file.originalname || '').toLowerCase();
@@ -128,7 +129,10 @@ app.post('/auth/upload-database/:slot?', upload.single('database'), (req, res) =
     try { fs.unlinkSync(req.file.path); } catch (err) { /* ignore */ }
     res.status(500).json({ error: e.message || 'Upload failed' });
   }
-});
+}
+
+app.post('/auth/upload-database', upload.single('database'), uploadDatabaseHandler);
+app.post('/auth/upload-database/:slot', upload.single('database'), uploadDatabaseHandler);
 
 app.use((req, res, next) => {
   if (canUseAppWithoutDatabase(req)) return next();
@@ -493,46 +497,59 @@ function extractImportantCharacteristics(analysis) {
 }
 
 async function generateCuratedSuggestionsWithLLM({ selectedTables, tableColumnsByTable, criteria, prompt }) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-
-  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+  const model = process.env.OLLAMA_MODEL || 'llama3.2:3b';
+  const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS || 20000);
   const schemaContext = selectedTables.map((t) => ({
     table: t,
     columns: tableColumnsByTable[t] || [],
   }));
   const userPrompt = [
     'Generate exactly 3 SQLite SELECT suggestions for curated models.',
-    'Return JSON array only. Each item must have: title, rationale, sql.',
-    'Do not include markdown or explanations outside JSON.',
+    'Return strict JSON only as {"suggestions":[...]}',
+    'Each suggestion item must have: title, rationale, sql.',
+    'Use only selected tables and valid SQLite syntax.',
+    'No markdown. No prose outside JSON.',
     `Selected tables: ${JSON.stringify(schemaContext)}`,
     `Criteria: ${criteria || ''}`,
     `User prompt: ${prompt || ''}`,
   ].join('\n');
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: 'You are an expert analytics engineer generating safe SQLite SELECT queries.' },
-        { role: 'user', content: userPrompt },
-      ],
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(`${ollamaBaseUrl}/api/generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        prompt: userPrompt,
+        stream: false,
+        format: 'json',
+        options: {
+          temperature: 0.2,
+          num_predict: 700,
+        },
+      }),
+    });
+  } catch (e) {
+    clearTimeout(timeoutId);
+    return null;
+  }
+  clearTimeout(timeoutId);
 
   if (!response.ok) return null;
   const payload = await response.json();
-  const content = payload?.choices?.[0]?.message?.content || '';
+  const content = payload?.response || '';
   try {
     const parsed = JSON.parse(content);
-    if (!Array.isArray(parsed)) return null;
-    const normalized = parsed
+    const suggestionsRaw = Array.isArray(parsed) ? parsed : parsed?.suggestions;
+    if (!Array.isArray(suggestionsRaw)) return null;
+    const normalized = suggestionsRaw
       .filter((s) => s && s.title && s.sql)
       .map((s) => ({
         title: String(s.title),
