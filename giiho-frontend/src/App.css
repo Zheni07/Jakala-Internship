@@ -256,9 +256,18 @@ body, html, #root, .modern-root {
 	color: #fff;
 	box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
 }
+.modern-header-auth-btn--ghost {
+	background: rgba(37, 99, 235, 0.08);
+	color: #2563eb;
+	border: 1px solid rgba(37, 99, 235, 0.25);
+}
 .modern-header-auth-btn--primary:hover {
 	transform: translateY(-1px);
 	box-shadow: 0 6px 20px rgba(37, 99, 235, 0.3);
+}
+.modern-header-auth-btn--ghost:hover {
+	background: rgba(37, 99, 235, 0.14);
+	transform: translateY(-1px);
 }
 .modern-hero {
 	display: flex; align-items: center; justify-content: center; flex-direction: row;

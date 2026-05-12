@@ -8,8 +8,8 @@ function AuthTopHeader() {
     <header className="modern-header ui-auth-header">
       <Link to="/" className="logo-title modern-header-logo-link">DataFlow Studio</Link>
       <nav className="modern-header-auth" aria-label="Профил">
-        <Link to="/login" className="modern-header-auth-link">Вход</Link>
-        <Link to="/register" className="modern-header-auth-btn modern-header-auth-btn--primary">Нов профил</Link>
+        <Link to="/register" className="modern-header-auth-btn modern-header-auth-btn--ghost">Регистрация</Link>
+        <Link to="/login" className="modern-header-auth-btn modern-header-auth-btn--primary">Вход в профил</Link>
       </nav>
     </header>
   );
