@@ -8,6 +8,12 @@ const { randomUUID } = require('crypto');
 const multer = require('multer');
 const workspace = require('./workspace');
 const auth = require('./auth');
+const { dbAll, dbGet, dbRun, withDatabase } = require('./lib/sqliteAsync');
+const { Http } = require('./lib/http');
+const { ensureSqlLimit, ensureLimit } = require('./lib/sqlHelpers');
+const { listJsonStemNames } = require('./lib/metadataListing');
+const { computePreviewAndDocumentation } = require('./lib/previewDocumentation');
+const { detectType, columnsFromPreview } = require('./lib/columnInference');
 
 const app = express();
 const PORT = 4000;
@@ -34,31 +40,31 @@ function resolveDbSlot(req) {
 app.post('/auth/register', async (req, res) => {
   try {
     const { email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-    if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (!email || !password) return Http.badRequest(res, 'Email and password required');
+    if (String(password).length < 6) return Http.badRequest(res, 'Password must be at least 6 characters');
     const user = await auth.createUser(email, password);
     workspace.ensureUserWorkspaces(user.id);
     const token = auth.signToken(user);
     res.json({ token, user: { id: user.id, email: user.email } });
   } catch (e) {
     if (String(e.message).includes('UNIQUE')) {
-      return res.status(409).json({ error: 'Email already registered' });
+      return Http.conflict(res, 'Email already registered');
     }
-    res.status(500).json({ error: e.message || 'Registration failed' });
+    Http.serverError(res, e.message || 'Registration failed');
   }
 });
 
 app.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    if (!email || !password) return Http.badRequest(res, 'Email and password required');
     const user = await auth.verifyLogin(email, password);
-    if (!user) return res.status(401).json({ error: 'Invalid email or password' });
+    if (!user) return Http.unauthorized(res, 'Invalid email or password');
     workspace.ensureUserWorkspaces(user.id);
     const token = auth.signToken(user);
     res.json({ token, user: { id: user.id, email: user.email } });
   } catch (e) {
-    res.status(500).json({ error: e.message || 'Login failed' });
+    Http.serverError(res, e.message || 'Login failed');
   }
 });
 
@@ -183,15 +189,6 @@ function invalidateCache(userId, type, name) {
 
 // In-memory performance job store for streaming
 const perfJobs = new Map();
-
-function ensureLimit(sql, limit) {
-  if (!sql) return '';
-  let trimmed = sql.trim();
-  if (!/limit\s+\d+/i.test(trimmed)) {
-    trimmed = trimmed.replace(/;*\s*$/, '') + ` LIMIT ${limit}`;
-  }
-  return trimmed;
-}
 
 function broadcastSample(job, payload) {
   job.esClients.forEach(res => {
@@ -387,14 +384,6 @@ function toSnakeCase(str) {
     .replace(/[^a-zA-Z0-9_]/g, '')
     .replace(/__+/g, '_')
     .toLowerCase();
-}
-
-function detectType(values) {
-  if (!Array.isArray(values) || values.length === 0) return 'string';
-  // Try to detect if all values are numbers or dates
-  if (values.every(v => v === null || v === '' || !isNaN(Number(v)))) return 'number';
-  if (values.every(v => v === null || v === '' || !isNaN(Date.parse(v)))) return 'date';
-  return 'string';
 }
 
 function safeSqlIdentifier(name) {
@@ -610,52 +599,37 @@ function calcNumericStats(values) {
 }
 
 // List all tables in the SQLite database
-app.get('/tables', (req, res) => {
+app.get('/tables', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
-  const ldb = new sqlite3.Database(d.dbPath);
-  ldb.all(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`, (err, rows) => {
-    ldb.close();
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows.map(row => row.name));
-  });
+  try {
+    const rows = await withDatabase(d.dbPath, (db) =>
+      dbAll(db, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
+    );
+    res.json(rows.map((row) => row.name));
+  } catch (err) {
+    Http.serverError(res, err.message);
+  }
 });
 
 app.get('/ai/database-analysis', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
-  const ldb = new sqlite3.Database(d.dbPath);
   try {
-    const tables = await new Promise((resolve, reject) => {
-      ldb.all(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`, (err, rows) => {
-        if (err) return reject(err);
-        resolve((rows || []).map((row) => row.name));
-      });
-    });
+    await withDatabase(d.dbPath, async (ldb) => {
+    const tableRows = await dbAll(ldb, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`);
+    const tables = tableRows.map((row) => row.name);
 
     const tableProfiles = [];
     for (const tableName of tables) {
-      const rowCount = await new Promise((resolve, reject) => {
-        ldb.get(`SELECT COUNT(*) AS c FROM "${tableName}"`, (err, row) => {
-          if (err) return reject(err);
-          resolve(row?.c || 0);
-        });
-      });
+      const countRow = await dbGet(ldb, `SELECT COUNT(*) AS c FROM "${tableName}"`);
+      const rowCount = countRow?.c || 0;
 
-      const schemaRows = await new Promise((resolve, reject) => {
-        ldb.all(`PRAGMA table_info("${tableName}")`, (err, rows) => {
-          if (err) return reject(err);
-          resolve(rows || []);
-        });
-      });
+      const schemaRows = await dbAll(ldb, `PRAGMA table_info("${tableName}")`);
 
       const columns = [];
       for (const col of schemaRows) {
         const colName = col.name;
-        const sampled = await new Promise((resolve, reject) => {
-          ldb.all(`SELECT "${colName}" AS v FROM "${tableName}" LIMIT 1000`, (err, rows) => {
-            if (err) return reject(err);
-            resolve((rows || []).map((r) => r.v));
-          });
-        });
+        const sampledRows = await dbAll(ldb, `SELECT "${colName}" AS v FROM "${tableName}" LIMIT 1000`);
+        const sampled = sampledRows.map((r) => r.v);
 
         const nonNull = sampled.filter((v) => v !== null && v !== '');
         const nulls = sampled.length - nonNull.length;
@@ -778,10 +752,9 @@ app.get('/ai/database-analysis', async (req, res) => {
     }, 100);
 
     res.json(result);
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Failed to analyze database' });
-  } finally {
-    ldb.close();
+    Http.serverError(res, err.message || 'Failed to analyze database');
   }
 });
 
@@ -789,71 +762,61 @@ app.post('/ai/curated-suggestions', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
   const { selectedTables = [], criteria = '', prompt = '' } = req.body || {};
   if (!Array.isArray(selectedTables) || selectedTables.length === 0) {
-    return res.status(400).json({ error: 'selectedTables is required' });
+    return Http.badRequest(res, 'selectedTables is required');
   }
-  const ldb = new sqlite3.Database(d.dbPath);
   try {
-    const availableTables = await new Promise((resolve, reject) => {
-      ldb.all(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`, (err, rows) => {
-        if (err) return reject(err);
-        resolve((rows || []).map((r) => r.name));
-      });
-    });
-    const validTables = selectedTables.filter((t) => availableTables.includes(t));
-    if (validTables.length === 0) {
-      return res.status(400).json({ error: 'No valid selected tables found in the active database' });
-    }
+    await withDatabase(d.dbPath, async (ldb) => {
+      const availableRows = await dbAll(ldb, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`);
+      const availableTables = availableRows.map((r) => r.name);
+      const validTables = selectedTables.filter((t) => availableTables.includes(t));
+      if (validTables.length === 0) {
+        return Http.badRequest(res, 'No valid selected tables found in the active database');
+      }
 
-    const tableColumnsByTable = {};
-    for (const table of validTables) {
-      const cols = await new Promise((resolve, reject) => {
-        ldb.all(`PRAGMA table_info(${safeSqlIdentifier(table)})`, (err, rows) => {
-          if (err) return reject(err);
-          resolve(rows || []);
-        });
-      });
-      tableColumnsByTable[table] = cols.map((c) => ({ name: c.name, type: c.type || '' }));
-    }
+      const tableColumnsByTable = {};
+      for (const table of validTables) {
+        const cols = await dbAll(ldb, `PRAGMA table_info(${safeSqlIdentifier(table)})`);
+        tableColumnsByTable[table] = cols.map((c) => ({ name: c.name, type: c.type || '' }));
+      }
 
-    let suggestions = await generateCuratedSuggestionsWithLLM({
-      selectedTables: validTables,
-      tableColumnsByTable,
-      prompt,
-      criteria,
-    });
-    let source = 'llm';
-    if (!suggestions || suggestions.length === 0) {
-      suggestions = buildCuratedSuggestions({
+      let suggestions = await generateCuratedSuggestionsWithLLM({
         selectedTables: validTables,
         tableColumnsByTable,
         prompt,
         criteria,
       });
-      source = 'rule-based';
-    }
+      let source = 'llm';
+      if (!suggestions || suggestions.length === 0) {
+        suggestions = buildCuratedSuggestions({
+          selectedTables: validTables,
+          tableColumnsByTable,
+          prompt,
+          criteria,
+        });
+        source = 'rule-based';
+      }
 
-    appendHistoryEntry(curatedHistoryPath(req.user.id, req.dbSlot), {
-      id: randomUUID(),
-      generatedAt: new Date().toISOString(),
-      source,
-      selectedTables: validTables,
-      criteria,
-      prompt,
-      suggestions,
-      usedSuggestionIndex: null,
-    }, 200);
+      appendHistoryEntry(curatedHistoryPath(req.user.id, req.dbSlot), {
+        id: randomUUID(),
+        generatedAt: new Date().toISOString(),
+        source,
+        selectedTables: validTables,
+        criteria,
+        prompt,
+        suggestions,
+        usedSuggestionIndex: null,
+      }, 200);
 
-    res.json({
-      generatedAt: new Date().toISOString(),
-      dbSlot: req.dbSlot,
-      source,
-      selectedTables: validTables,
-      suggestions,
+      res.json({
+        generatedAt: new Date().toISOString(),
+        dbSlot: req.dbSlot,
+        source,
+        selectedTables: validTables,
+        suggestions,
+      });
     });
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Failed to generate curated suggestions' });
-  } finally {
-    ldb.close();
+    Http.serverError(res, err.message || 'Failed to generate curated suggestions');
   }
 });
 
@@ -890,55 +853,39 @@ app.post('/ai/curated-history/use', (req, res) => {
 });
 
 // Get all data from a specific table with pagination and caching
-app.get('/table/:name', (req, res) => {
+app.get('/table/:name', async (req, res) => {
   const uid = req.user.id;
   const cacheUid = `${uid}:${req.dbSlot}`;
   const d = workspace.dirs(uid, req.dbSlot);
-  const ldb = new sqlite3.Database(d.dbPath);
   const tableName = req.params.name;
-  const page = Math.max(1, parseInt(req.query.page) || 1);
-  const limit = Math.min(500, parseInt(req.query.limit) || 100); // Max 500 per page
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(500, parseInt(req.query.limit, 10) || 100); // Max 500 per page
   const offset = (page - 1) * limit;
 
   let countResult = getCachedData(cacheUid, 'table', `${tableName}:count`);
 
-  Promise.all([
-    new Promise((resolve, reject) => {
-      if (countResult !== null) {
-        resolve(countResult);
-      } else {
-        ldb.get(`SELECT COUNT(*) as count FROM "${tableName}"`, (err, row) => {
-          if (err) reject(err);
-          else {
-            setCachedData(cacheUid, 'table', `${tableName}:count`, row.count);
-            resolve(row.count);
-          }
-        });
+  try {
+    await withDatabase(d.dbPath, async (ldb) => {
+      let total = countResult;
+      if (total === null) {
+        const row = await dbGet(ldb, `SELECT COUNT(*) as count FROM "${tableName}"`);
+        total = row.count;
+        setCachedData(cacheUid, 'table', `${tableName}:count`, total);
       }
-    }),
-    new Promise((resolve, reject) => {
-      ldb.all(`SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset}`, (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
+      const rows = await dbAll(ldb, `SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset}`);
+      res.json({
+        data: rows,
+        pagination: {
+          page,
+          limit,
+          total,
+          hasMore: offset + limit < total,
+        },
       });
-    })
-  ]).then(([total, rows]) => {
-    res.json({
-      data: rows,
-      pagination: {
-        page,
-        limit,
-        total,
-        hasMore: offset + limit < total
-      }
     });
-  }).catch(err => {
-    res.status(500).json({ error: err.message });
-  }).finally(() => {
-    try {
-      ldb.close();
-    } catch (e) { /* ignore */ }
-  });
+  } catch (err) {
+    Http.serverError(res, err.message);
+  }
 });
 
 // Save generated staging model SQL
@@ -968,60 +915,31 @@ app.post('/generate-user-model', (req, res) => {
 });
 
 // Preview custom staging SQL (returns up to 100 rows)
-app.post('/preview-staging-sql', (req, res) => {
+app.post('/preview-staging-sql', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
   const { sql } = req.body;
-  if (!sql) return res.status(400).json({ error: 'Missing SQL' });
-  let previewSQL = sql.trim();
-  // Add LIMIT 100 if not present
-  if (!/limit\s+\d+/i.test(previewSQL)) {
-    previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
-  }
-  const ldb = new sqlite3.Database(d.dbPath);
-  ldb.all(previewSQL, (err, rows) => {
-    ldb.close();
-    if (err) return res.status(400).json({ error: err.message });
+  if (!sql) return Http.badRequest(res, 'Missing SQL');
+  const previewSQL = ensureSqlLimit(sql.trim(), 100);
+  try {
+    const rows = await withDatabase(d.dbPath, (db) => dbAll(db, previewSQL));
     res.json({ rows });
-  });
+  } catch (err) {
+    Http.badRequest(res, err.message);
+  }
 });
 
 // Auto-documentation preview endpoint
 app.post('/api/preview', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
   const { sql } = req.body;
-  if (!sql) return res.status(400).json({ error: 'Missing SQL' });
-  let previewSQL = sql.trim();
-  if (!/limit\s+\d+/i.test(previewSQL)) {
-    previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
-  }
+  if (!sql) return Http.badRequest(res, 'Missing SQL');
+  const previewSQL = ensureSqlLimit(sql.trim(), 100);
   try {
-    const ldb = new sqlite3.Database(d.dbPath);
-    const preview = await new Promise((resolve, reject) => {
-      ldb.all(previewSQL, (err, rows) => {
-        ldb.close();
-        return err ? reject(err) : resolve(rows);
-      });
-    });
-    let columns = [];
-    if (preview.length > 0) {
-      const keys = Object.keys(preview[0]);
-      columns = keys.map(col => {
-        const values = preview.map(row => row[col]);
-        const nonNullValues = values.filter(v => v !== null && v !== '');
-        const type = detectType(nonNullValues);
-        const nullable = values.some(v => v === null || v === '');
-        const unique = new Set(nonNullValues).size === nonNullValues.length && nonNullValues.length === preview.length;
-        return {
-          name: col,
-          type,
-          nullable,
-          unique,
-        };
-      });
-    }
+    const preview = await withDatabase(d.dbPath, (db) => dbAll(db, previewSQL));
+    const columns = columnsFromPreview(preview);
     res.json({ columns, preview });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    Http.badRequest(res, e.message);
   }
 });
 
@@ -1029,22 +947,12 @@ app.post('/api/preview', async (req, res) => {
 app.get('/stagings', (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
   const cleanedAt = workspace.getLayersCleanupTimestamp(req.user.id, req.dbSlot);
-  fs.readdir(d.METADATA_DIR, (err, files) => {
-    if (err) return res.status(500).json({ error: err.message });
-    const names = files
-      .filter(f => f.endsWith('.json'))
-      .filter((f) => {
-        if (!cleanedAt) return true;
-        try {
-          const stat = fs.statSync(path.join(d.METADATA_DIR, f));
-          return stat.mtimeMs >= cleanedAt;
-        } catch (e) {
-          return false;
-        }
-      })
-      .map(f => f.replace(/\.json$/, ''));
+  try {
+    const names = listJsonStemNames(d.METADATA_DIR, cleanedAt);
     res.json({ stagings: names });
-  });
+  } catch (err) {
+    Http.serverError(res, err.message);
+  }
 });
 
 // Get a specific staging (SQL, doc, preview) - with caching
@@ -1073,28 +981,34 @@ app.get('/staging/:name', (req, res) => {
 });
 
 // Delete a saved staging (metadata, SQL file, and drop table)
-app.delete('/staging/:name', (req, res) => {
+app.delete('/staging/:name', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
   const name = req.params.name;
   const metaPath = path.join(d.METADATA_DIR, `${name}.json`);
   const sqlPath = path.join(d.modelsStaging, `${name}.sql`);
-  let errors = [];
+  const errors = [];
   const cacheUid = `${req.user.id}:${req.dbSlot}`;
   invalidateCache(cacheUid, 'staging', name);
   invalidateCache(cacheUid, 'table', `${name}:count`);
-  // Delete metadata JSON
-  try { fs.unlinkSync(metaPath); } catch (e) { errors.push(e.message); }
-  // Delete SQL file
-  try { fs.unlinkSync(sqlPath); } catch (e) { errors.push(e.message); }
-  const ldb = new sqlite3.Database(d.dbPath);
-  ldb.run(`DROP TABLE IF EXISTS "${name}"`, (err) => {
-    ldb.close();
-    if (err) errors.push(err.message);
-    if (errors.length > 0) {
-      return res.status(500).json({ error: 'Failed to delete some files or table', details: errors });
-    }
-    res.json({ success: true });
-  });
+  try {
+    fs.unlinkSync(metaPath);
+  } catch (e) {
+    errors.push(e.message);
+  }
+  try {
+    fs.unlinkSync(sqlPath);
+  } catch (e) {
+    errors.push(e.message);
+  }
+  try {
+    await withDatabase(d.dbPath, (ldb) => dbRun(ldb, `DROP TABLE IF EXISTS "${name}"`));
+  } catch (err) {
+    errors.push(err.message);
+  }
+  if (errors.length > 0) {
+    return res.status(500).json({ error: 'Failed to delete some files or table', details: errors });
+  }
+  res.json({ success: true });
 });
 
 // Utility to generate dbt-compatible YAML schema
@@ -1133,84 +1047,24 @@ app.post('/save-staging-sql', (req, res) => {
     let tableCreated = false;
     let tableError = null;
     let yamlSchema = yaml;
-    // Preview and doc generation if not provided
-    let previewSQL = sql.trim();
-    if (!/limit\s+\d+/i.test(previewSQL)) {
-      previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
-    }
     const db = new sqlite3.Database(d.dbPath);
     try {
-      preview = await new Promise((resolve, reject) => {
-        db.all(previewSQL, (err, rows) => err ? reject(err) : resolve(rows));
-      });
-      // Normalize documentation structure: ensure 'name' field exists (support both 'column' and 'name')
-      if (doc && doc.length > 0) {
-        doc = doc.map(col => {
-          const normalized = {
-            ...col,
-            name: col.name || col.column || col.source || col.original || '',
-            // Preserve all custom fields
-            description: col.description || '',
-            type: col.type || typeof preview[0]?.[col.name || col.column] || 'string',
-            nullable: col.nullable !== undefined ? col.nullable : (preview.length > 0 ? preview.some(row => row[col.name || col.column] === null || row[col.name || col.column] === '') : false),
-            unique: col.unique !== undefined ? col.unique : (preview.length > 0 ? new Set(preview.map(row => row[col.name || col.column])).size === preview.length : false),
-            testNull: col.testNull || false,
-            testUnique: col.testUnique || false
-          };
-          // Remove old field names to avoid confusion
-          delete normalized.column;
-          return normalized;
-        });
-      } else if (preview.length > 0) {
-        // Generate new documentation if none provided
-        const keys = Object.keys(preview[0]);
-        doc = keys.map(col => ({
-          name: col,
-          type: typeof preview[0][col],
-          description: '',
-          nullable: preview.some(row => row[col] === null || row[col] === ''),
-          unique: new Set(preview.map(row => row[col])).size === preview.length,
-          testNull: false,
-          testUnique: false
-        }));
+      const computed = await computePreviewAndDocumentation(db, sql, documentation);
+      preview = computed.preview;
+      doc = computed.doc;
+      if (createTable) {
+        try {
+          await dbRun(db, `DROP TABLE IF EXISTS "${name}"`);
+          const selectSQL = sql.trim().replace(/;\s*$/, '');
+          await dbRun(db, `CREATE TABLE "${name}" AS ${selectSQL}`);
+          tableCreated = true;
+        } catch (e) {
+          tableError = e.message;
+        }
       }
-    } catch (e) {
-      preview = [];
-      // Normalize documentation even if preview fails
-      if (doc && doc.length > 0) {
-        doc = doc.map(col => ({
-          ...col,
-          name: col.name || col.column || col.source || col.original || '',
-          description: col.description || '',
-          type: col.type || 'string',
-          nullable: col.nullable !== undefined ? col.nullable : false,
-          unique: col.unique !== undefined ? col.unique : false,
-          testNull: col.testNull || false,
-          testUnique: col.testUnique || false
-        })).map(col => {
-          delete col.column;
-          return col;
-        });
-      } else {
-        doc = [];
-      }
+    } finally {
+      db.close();
     }
-    // Optionally create table
-    if (createTable) {
-      try {
-        await new Promise((resolve, reject) => {
-          db.run(`DROP TABLE IF EXISTS "${name}"`, err => err ? reject(err) : resolve());
-        });
-        const selectSQL = sql.trim().replace(/;\s*$/, '');
-        await new Promise((resolve, reject) => {
-          db.run(`CREATE TABLE "${name}" AS ${selectSQL}`, err => err ? reject(err) : resolve());
-        });
-        tableCreated = true;
-      } catch (e) {
-        tableError = e.message;
-      }
-    }
-    db.close();
     // Generate YAML if not provided
     if (!yamlSchema) {
       yamlSchema = generateDbtYaml({ name, description: tableDescription, columns: doc });
@@ -1237,51 +1091,41 @@ app.post('/save-staging-sql', (req, res) => {
 });
 
 // Endpoint to drop all staged tables (names starting with 'stg_')
-app.post('/drop-staged-tables', (req, res) => {
+app.post('/drop-staged-tables', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
-  const db = new sqlite3.Database(d.dbPath);
-  db.all(`SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'stg_%'`, (err, rows) => {
-    if (err) {
-      db.close();
-      return res.status(500).json({ error: err.message });
-    }
-    const tables = rows.map(r => r.name);
-    let dropped = 0;
-    let errors = [];
-    if (tables.length === 0) {
-      db.close();
-      return res.json({ success: true, dropped: 0 });
-    }
-    tables.forEach(table => {
-      db.run(`DROP TABLE IF EXISTS "${table}"`, err => {
-        if (err) errors.push({ table, error: err.message });
-        dropped++;
-        if (dropped === tables.length) {
-          db.close();
-          if (errors.length > 0) {
-            res.status(500).json({ error: 'Some tables could not be dropped', details: errors });
-          } else {
-            res.json({ success: true, dropped });
-          }
+  try {
+    const { dropped, errors } = await withDatabase(d.dbPath, async (db) => {
+      const rows = await dbAll(db, `SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'stg_%'`);
+      const tables = rows.map((r) => r.name);
+      const errors = [];
+      for (const table of tables) {
+        try {
+          await dbRun(db, `DROP TABLE IF EXISTS "${table}"`);
+        } catch (err) {
+          errors.push({ table, error: err.message });
         }
-      });
+      }
+      return { dropped: tables.length, errors };
     });
-  });
+    if (errors.length > 0) {
+      return res.status(500).json({ error: 'Some tables could not be dropped', details: errors });
+    }
+    res.json({ success: true, dropped });
+  } catch (err) {
+    Http.serverError(res, err.message);
+  }
 });
 
 // Download entire staged table as CSV
-app.get('/download-staged/:name', (req, res) => {
+app.get('/download-staged/:name', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
   const tableName = req.params.name;
-  // Only allow staged tables
   if (!tableName.startsWith('stg_')) {
-    return res.status(400).json({ error: 'Not a staged table' });
+    return Http.badRequest(res, 'Not a staged table');
   }
-  const db = new sqlite3.Database(d.dbPath);
-  db.all(`SELECT * FROM "${tableName}"`, (err, rows) => {
-    db.close();
-    if (err) return res.status(500).json({ error: err.message });
-    if (!rows || rows.length === 0) {
+  try {
+    const rows = await withDatabase(d.dbPath, (db) => dbAll(db, `SELECT * FROM "${tableName}"`));
+    if (!rows.length) {
       res.setHeader('Content-Disposition', `attachment; filename="${tableName}.csv"`);
       res.setHeader('Content-Type', 'text/csv');
       return res.send('');
@@ -1289,40 +1133,33 @@ app.get('/download-staged/:name', (req, res) => {
     const keys = Object.keys(rows[0]);
     const csvRows = [keys.join(',')];
     for (const row of rows) {
-      csvRows.push(keys.map(k => {
-        const val = row[k];
-        if (val == null) return '';
-        // Escape quotes
-        return '"' + String(val).replace(/"/g, '""') + '"';
-      }).join(','));
+      csvRows.push(
+        keys.map((k) => {
+          const val = row[k];
+          if (val == null) return '';
+          return '"' + String(val).replace(/"/g, '""') + '"';
+        }).join(',')
+      );
     }
     const csv = csvRows.join('\n');
     res.setHeader('Content-Disposition', `attachment; filename="${tableName}.csv"`);
     res.setHeader('Content-Type', 'text/csv');
     res.send(csv);
-  });
+  } catch (err) {
+    Http.serverError(res, err.message);
+  }
 });
 
 // List all curated models
 app.get('/curated-models', (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
   const cleanedAt = workspace.getLayersCleanupTimestamp(req.user.id, req.dbSlot);
-  fs.readdir(d.CURATED_META_DIR, (err, files) => {
-    if (err) return res.status(500).json({ error: err.message });
-    const names = files
-      .filter(f => f.endsWith('.json'))
-      .filter((f) => {
-        if (!cleanedAt) return true;
-        try {
-          const stat = fs.statSync(path.join(d.CURATED_META_DIR, f));
-          return stat.mtimeMs >= cleanedAt;
-        } catch (e) {
-          return false;
-        }
-      })
-      .map(f => f.replace(/\.json$/, ''));
+  try {
+    const names = listJsonStemNames(d.CURATED_META_DIR, cleanedAt);
     res.json({ models: names });
-  });
+  } catch (err) {
+    Http.serverError(res, err.message);
+  }
 });
 
 // Get a specific curated model (SQL, doc, preview) - with caching
@@ -1359,94 +1196,28 @@ app.post('/curated-models', async (req, res) => {
   if (!name || !sql) return res.status(400).json({ error: 'Missing name or SQL' });
   const filePath = path.join(d.CURATED_DIR, `${name}.sql`);
   fs.writeFileSync(filePath, sql);
-  // Preview and doc generation if not provided
   let preview = [];
   let doc = documentation || [];
-  let previewSQL = sql.trim();
-  if (!/limit\s+\d+/i.test(previewSQL)) {
-    previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
-  }
-  const db = new sqlite3.Database(d.dbPath);
   let tableCreated = false;
   let tableError = null;
+  const db = new sqlite3.Database(d.dbPath);
   try {
-    preview = await new Promise((resolve, reject) => {
-      db.all(previewSQL, (err, rows) => err ? reject(err) : resolve(rows));
-    });
-    // Normalize documentation structure: ensure 'name' field exists and preserve all fields
-    if (doc && doc.length > 0) {
-      doc = doc.map(col => {
-        const normalized = {
-          ...col,
-          name: col.name || col.column || col.source || col.original || '',
-          // Preserve all custom fields
-          description: col.description || '',
-          type: col.type || typeof preview[0]?.[col.name || col.column] || 'string',
-          nullable: col.nullable !== undefined ? col.nullable : (preview.length > 0 ? preview.some(row => row[col.name || col.column] === null || row[col.name || col.column] === '') : false),
-          unique: col.unique !== undefined ? col.unique : (preview.length > 0 ? new Set(preview.map(row => row[col.name || col.column])).size === preview.length : false),
-          testNull: col.testNull || false,
-          testUnique: col.testUnique || false
-        };
-        // Remove old field names to avoid confusion
-        delete normalized.column;
-        return normalized;
-      });
-    } else if (preview.length > 0) {
-      // Generate new documentation if none provided
-      const keys = Object.keys(preview[0]);
-      doc = keys.map(col => {
-        const values = preview.map(row => row[col]);
-        const nonNullValues = values.filter(v => v !== null && v !== '');
-        return {
-          name: col,
-          type: typeof preview[0][col],
-          description: '',
-          nullable: values.some(v => v === null || v === ''),
-          unique: new Set(nonNullValues).size === nonNullValues.length && nonNullValues.length === preview.length,
-          testNull: false,
-          testUnique: false
-        };
-      });
+    const computed = await computePreviewAndDocumentation(db, sql, documentation);
+    preview = computed.preview;
+    doc = computed.doc;
+    if (createTable) {
+      try {
+        await dbRun(db, `DROP TABLE IF EXISTS "${name}"`);
+        const selectSQL = sql.trim().replace(/;\s*$/, '');
+        await dbRun(db, `CREATE TABLE "${name}" AS ${selectSQL}`);
+        tableCreated = true;
+      } catch (e) {
+        tableError = e.message;
+      }
     }
-  } catch (e) {
-    preview = [];
-    // Normalize documentation even if preview fails
-    if (doc && doc.length > 0) {
-      doc = doc.map(col => ({
-        ...col,
-        name: col.name || col.column || col.source || col.original || '',
-        description: col.description || '',
-        type: col.type || 'string',
-        nullable: col.nullable !== undefined ? col.nullable : false,
-        unique: col.unique !== undefined ? col.unique : false,
-        testNull: col.testNull || false,
-        testUnique: col.testUnique || false
-      })).map(col => {
-        delete col.column;
-        return col;
-      });
-    } else {
-      doc = [];
-    }
+  } finally {
+    db.close();
   }
-  // Materialize curated table so marts layer can query it
-  if (createTable) {
-    try {
-      await new Promise((resolve, reject) => {
-        db.run(`DROP TABLE IF EXISTS "${name}"`, err => err ? reject(err) : resolve());
-      });
-      const selectSQL = sql.trim().replace(/;\s*$/, '');
-      await new Promise((resolve, reject) => {
-        db.run(`CREATE TABLE "${name}" AS ${selectSQL}`, err => err ? reject(err) : resolve());
-      });
-      tableCreated = true;
-    } catch (e) {
-      tableError = e.message;
-    }
-  }
-  db.close();
-
-  // Chart generation removed
 
   // Save metadata
   const meta = {
@@ -1467,38 +1238,13 @@ app.post('/curated-models', async (req, res) => {
 app.post('/api/curated-preview', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
   const { sql } = req.body;
-  if (!sql) return res.status(400).json({ error: 'Missing SQL' });
-  let previewSQL = sql.trim();
-  if (!/limit\s+\d+/i.test(previewSQL)) {
-    previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
-  }
-  const db = new sqlite3.Database(d.dbPath);
+  if (!sql) return Http.badRequest(res, 'Missing SQL');
+  const previewSQL = ensureSqlLimit(sql.trim(), 100);
   try {
-    const preview = await new Promise((resolve, reject) => {
-      db.all(previewSQL, (err, rows) => err ? reject(err) : resolve(rows));
-    });
-    let columns = [];
-    if (preview.length > 0) {
-      const keys = Object.keys(preview[0]);
-      columns = keys.map(col => {
-        const values = preview.map(row => row[col]);
-        const nonNullValues = values.filter(v => v !== null && v !== '');
-        const type = detectType(nonNullValues);
-        const nullable = values.some(v => v === null || v === '');
-        const unique = new Set(nonNullValues).size === nonNullValues.length && nonNullValues.length === preview.length;
-        return {
-          name: col,
-          type,
-          nullable,
-          unique,
-        };
-      });
-    }
-    db.close();
-    res.json({ columns, preview });
+    const preview = await withDatabase(d.dbPath, (db) => dbAll(db, previewSQL));
+    res.json({ columns: columnsFromPreview(preview), preview });
   } catch (e) {
-    db.close();
-    res.status(400).json({ error: e.message });
+    Http.badRequest(res, e.message);
   }
 });
 
@@ -1516,19 +1262,15 @@ app.get('/curated-model/:name/data', async (req, res) => {
       return res.status(400).json({ error: 'No SQL query found for this model' });
     }
 
-    const db = new sqlite3.Database(d.dbPath);
     let finalSQL = sql.trim();
     if (limit && !/limit\s+\d+/i.test(finalSQL)) {
       finalSQL = finalSQL.replace(/;*\s*$/, '') + ` LIMIT ${limit}`;
     }
-    const rows = await new Promise((resolve, reject) => {
-      db.all(finalSQL, (err, rows) => err ? reject(err) : resolve(rows));
-    });
-    db.close();
+    const rows = await withDatabase(d.dbPath, (db) => dbAll(db, finalSQL));
     res.json({ rows, limit });
   } catch (err) {
     console.error(`Error fetching curated model data: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    Http.serverError(res, err.message);
   }
 });
 
@@ -1544,19 +1286,15 @@ app.get('/curated-model/:name/export', async (req, res) => {
     const sql = metaData.sql;
 
     if (!sql) {
-      return res.status(400).json({ error: 'No SQL query found for this model' });
+      return Http.badRequest(res, 'No SQL query found for this model');
     }
 
-    const db = new sqlite3.Database(d.dbPath);
-    const rows = await new Promise((resolve, reject) => {
-      db.all(sql.trim(), (err, rows) => err ? reject(err) : resolve(rows));
-    });
-    db.close();
-    
+    const rows = await withDatabase(d.dbPath, (db) => dbAll(db, sql.trim()));
+
     if (rows.length === 0) {
-      return res.status(404).json({ error: 'No data found for this query' });
+      return Http.notFound(res, 'No data found for this query');
     }
-    
+
     if (format === 'json') {
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Content-Disposition', `attachment; filename="${name}.json"`);
@@ -1645,13 +1383,7 @@ async function runTimedQuery(dbPath, sql, limit = FULL_CHART_ROWS) {
   if (!sql) throw new Error('Missing SQL');
   const finalSQL = ensureLimit(sql, limit);
   const start = process.hrtime.bigint();
-  const ldb = new sqlite3.Database(dbPath);
-  const rows = await new Promise((resolve, reject) => {
-    ldb.all(finalSQL, (err, r) => {
-      ldb.close();
-      return err ? reject(err) : resolve(r);
-    });
-  });
+  const rows = await withDatabase(dbPath, (ldb) => dbAll(ldb, finalSQL));
   const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
   return { rows, elapsedMs };
 }
@@ -1661,22 +1393,12 @@ async function runTimedQuery(dbPath, sql, limit = FULL_CHART_ROWS) {
 app.get('/marts', (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
   const cleanedAt = workspace.getLayersCleanupTimestamp(req.user.id, req.dbSlot);
-  fs.readdir(d.MARTS_META_DIR, (err, files) => {
-    if (err) return res.status(500).json({ error: err.message });
-    const names = files
-      .filter(f => f.endsWith('.json'))
-      .filter((f) => {
-        if (!cleanedAt) return true;
-        try {
-          const stat = fs.statSync(path.join(d.MARTS_META_DIR, f));
-          return stat.mtimeMs >= cleanedAt;
-        } catch (e) {
-          return false;
-        }
-      })
-      .map(f => f.replace(/\.json$/, ''));
+  try {
+    const names = listJsonStemNames(d.MARTS_META_DIR, cleanedAt);
     res.json({ models: names });
-  });
+  } catch (err) {
+    Http.serverError(res, err.message);
+  }
 });
 
 // Get a specific mart model (SQL, doc, preview)
@@ -1855,80 +1577,20 @@ app.post('/mart/:name/compare', async (req, res) => {
 app.post('/marts', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
   const { name, sql, documentation, tableDescription } = req.body;
-  if (!name || !sql) return res.status(400).json({ error: 'Missing name or SQL' });
+  if (!name || !sql) return Http.badRequest(res, 'Missing name or SQL');
   const filePath = path.join(d.MARTS_DIR, `${name}.sql`);
   fs.writeFileSync(filePath, sql);
-  // Preview and doc generation if not provided
   let preview = [];
   let doc = documentation || [];
-  let previewSQL = sql.trim();
-  if (!/limit\s+\d+/i.test(previewSQL)) {
-    previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
-  }
   const db = new sqlite3.Database(d.dbPath);
   try {
-    preview = await new Promise((resolve, reject) => {
-      db.all(previewSQL, (err, rows) => err ? reject(err) : resolve(rows));
-    });
-    // Normalize documentation structure: ensure 'name' field exists and preserve all fields
-    if (doc && doc.length > 0) {
-      doc = doc.map(col => {
-        const normalized = {
-          ...col,
-          name: col.name || col.column || col.source || col.original || '',
-          // Preserve all custom fields
-          description: col.description || '',
-          type: col.type || typeof preview[0]?.[col.name || col.column] || 'string',
-          nullable: col.nullable !== undefined ? col.nullable : (preview.length > 0 ? preview.some(row => row[col.name || col.column] === null || row[col.name || col.column] === '') : false),
-          unique: col.unique !== undefined ? col.unique : (preview.length > 0 ? new Set(preview.map(row => row[col.name || col.column])).size === preview.length : false),
-          testNull: col.testNull || false,
-          testUnique: col.testUnique || false
-        };
-        // Remove old field names to avoid confusion
-        delete normalized.column;
-        return normalized;
-      });
-    } else if (preview.length > 0) {
-      // Generate new documentation if none provided
-      const keys = Object.keys(preview[0]);
-      doc = keys.map(col => {
-        const values = preview.map(row => row[col]);
-        const nonNullValues = values.filter(v => v !== null && v !== '');
-        return {
-          name: col,
-          type: typeof preview[0][col],
-          description: '',
-          nullable: values.some(v => v === null || v === ''),
-          unique: new Set(nonNullValues).size === nonNullValues.length && nonNullValues.length === preview.length,
-          testNull: false,
-          testUnique: false
-        };
-      });
-    }
-  } catch (e) {
-    preview = [];
-    // Normalize documentation even if preview fails
-    if (doc && doc.length > 0) {
-      doc = doc.map(col => ({
-        ...col,
-        name: col.name || col.column || col.source || col.original || '',
-        description: col.description || '',
-        type: col.type || 'string',
-        nullable: col.nullable !== undefined ? col.nullable : false,
-        unique: col.unique !== undefined ? col.unique : false,
-        testNull: col.testNull || false,
-        testUnique: col.testUnique || false
-      })).map(col => {
-        delete col.column;
-        return col;
-      });
-    } else {
-      doc = [];
-    }
+    const computed = await computePreviewAndDocumentation(db, sql, documentation);
+    preview = computed.preview;
+    doc = computed.doc;
+  } finally {
+    db.close();
   }
-  db.close();
 
-  // Save metadata
   const meta = {
     name,
     sql,
@@ -1945,39 +1607,13 @@ app.post('/marts', async (req, res) => {
 app.post('/api/mart-preview', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
   const { sql } = req.body;
-  if (!sql) return res.status(400).json({ error: 'Missing SQL' });
-  let previewSQL = sql.trim();
-  if (!/limit\s+\d+/i.test(previewSQL)) {
-    previewSQL = previewSQL.replace(/;*\s*$/, '') + ' LIMIT 100';
-  }
+  if (!sql) return Http.badRequest(res, 'Missing SQL');
+  const previewSQL = ensureSqlLimit(sql.trim(), 100);
   try {
-    const ldb = new sqlite3.Database(d.dbPath);
-    const preview = await new Promise((resolve, reject) => {
-      ldb.all(previewSQL, (err, rows) => {
-        ldb.close();
-        return err ? reject(err) : resolve(rows);
-      });
-    });
-    let columns = [];
-    if (preview.length > 0) {
-      const keys = Object.keys(preview[0]);
-      columns = keys.map(col => {
-        const values = preview.map(row => row[col]);
-        const nonNullValues = values.filter(v => v !== null && v !== '');
-        const type = detectType(nonNullValues);
-        const nullable = values.some(v => v === null || v === '');
-        const unique = new Set(nonNullValues).size === nonNullValues.length && nonNullValues.length === preview.length;
-        return {
-          name: col,
-          type,
-          nullable,
-          unique,
-        };
-      });
-    }
-    res.json({ columns, preview });
+    const preview = await withDatabase(d.dbPath, (db) => dbAll(db, previewSQL));
+    res.json({ columns: columnsFromPreview(preview), preview });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    Http.badRequest(res, e.message);
   }
 });
 
@@ -1999,17 +1635,11 @@ app.get('/mart/:name/data', async (req, res) => {
     if (limit && !/limit\s+\d+/i.test(finalSQL)) {
       finalSQL = finalSQL.replace(/;*\s*$/, '') + ` LIMIT ${limit}`;
     }
-    const ldb = new sqlite3.Database(d.dbPath);
-    const rows = await new Promise((resolve, reject) => {
-      ldb.all(finalSQL, (err, r) => {
-        ldb.close();
-        return err ? reject(err) : resolve(r);
-      });
-    });
+    const rows = await withDatabase(d.dbPath, (db) => dbAll(db, finalSQL));
     res.json({ rows, limit });
   } catch (err) {
     console.error(`Error fetching mart model data: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    Http.serverError(res, err.message);
   }
 });
 
@@ -2025,21 +1655,16 @@ app.get('/mart/:name/export', async (req, res) => {
     const sql = metaData.sql;
 
     if (!sql) {
-      return res.status(400).json({ error: 'No SQL query found for this model' });
+      return Http.badRequest(res, 'No SQL query found for this model');
     }
 
-    const db = new sqlite3.Database(d.dbPath);
-    const rows = await new Promise((resolve, reject) => {
-      db.all(sql.trim(), (err, rows) => err ? reject(err) : resolve(rows));
-    });
-    db.close();
-    
+    const rows = await withDatabase(d.dbPath, (db) => dbAll(db, sql.trim()));
+
     if (format === 'json') {
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Content-Disposition', `attachment; filename="${name}.json"`);
       res.json(rows);
     } else {
-      // CSV format
       if (rows.length === 0) {
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', `attachment; filename="${name}.csv"`);

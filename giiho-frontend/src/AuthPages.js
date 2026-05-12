@@ -6,7 +6,11 @@ import { UiBanner, UiButton, UiCard, UiField } from './ui';
 function AuthTopHeader() {
   return (
     <header className="modern-header ui-auth-header">
-      <div className="logo-title">DataFlow Studio</div>
+      <Link to="/" className="logo-title modern-header-logo-link">DataFlow Studio</Link>
+      <nav className="modern-header-auth" aria-label="Профил">
+        <Link to="/login" className="modern-header-auth-link">Вход</Link>
+        <Link to="/register" className="modern-header-auth-btn modern-header-auth-btn--primary">Нов профил</Link>
+      </nav>
     </header>
   );
 }

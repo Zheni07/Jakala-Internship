@@ -214,6 +214,52 @@ body, html, #root, .modern-root {
 	background: linear-gradient(90deg,#2563eb 0%,#60a5fa 100%);
 	-webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
+.modern-header-logo-link {
+	text-decoration: none;
+	display: inline-block;
+}
+.modern-header-auth {
+	display: flex;
+	align-items: center;
+	gap: 0.65rem;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+}
+.modern-header-auth-link {
+	font-size: 0.95rem;
+	font-weight: 600;
+	color: #2563eb;
+	text-decoration: none;
+	padding: 0.45rem 0.85rem;
+	border-radius: 0.6rem;
+	transition: background 0.15s ease;
+}
+.modern-header-auth-link:hover {
+	background: rgba(37, 99, 235, 0.1);
+}
+.modern-header-auth-btn {
+	font-size: 0.95rem;
+	font-weight: 700;
+	padding: 0.5rem 1.1rem;
+	border-radius: 9999px;
+	border: none;
+	cursor: pointer;
+	text-decoration: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	transition: transform 0.15s ease, box-shadow 0.15s ease;
+	font-family: inherit;
+}
+.modern-header-auth-btn--primary {
+	background: linear-gradient(90deg, #2563eb 0%, #60a5fa 100%);
+	color: #fff;
+	box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
+}
+.modern-header-auth-btn--primary:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 6px 20px rgba(37, 99, 235, 0.3);
+}
 .modern-hero {
 	display: flex; align-items: center; justify-content: center; flex-direction: row;
 	padding: 6rem 2.5rem; background: linear-gradient(120deg,#e0e7ef 0%,#f6faff 100%);

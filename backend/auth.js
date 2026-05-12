@@ -4,17 +4,14 @@ const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
+const { withDatabase, dbRun, dbGet } = require('./lib/sqliteAsync');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-dataflowstudio-change-me';
 const APP_DB = path.join(__dirname, 'data', 'app.sqlite');
 
-function getAppDb() {
-  return new sqlite3.Database(APP_DB);
-}
-
 function initAuthDb() {
   fs.mkdirSync(path.dirname(APP_DB), { recursive: true });
-  const db = getAppDb();
+  const db = new sqlite3.Database(APP_DB);
   db.run(`CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT UNIQUE NOT NULL,
@@ -24,33 +21,26 @@ function initAuthDb() {
   db.close();
 }
 
-function createUser(email, password) {
+async function createUser(email, password) {
   const id = randomUUID();
   const hash = bcrypt.hashSync(password, 10);
   const normalized = String(email).toLowerCase().trim();
-  return new Promise((resolve, reject) => {
-    const db = getAppDb();
-    db.run(
-      'INSERT INTO users (id, email, password_hash, created_at) VALUES (?,?,?,?)',
-      [id, normalized, hash, new Date().toISOString()],
-      function onRun(err) {
-        db.close();
-        if (err) return reject(err);
-        resolve({ id, email: normalized });
-      }
-    );
+  await withDatabase(APP_DB, async (db) => {
+    await dbRun(db, 'INSERT INTO users (id, email, password_hash, created_at) VALUES (?,?,?,?)', [
+      id,
+      normalized,
+      hash,
+      new Date().toISOString(),
+    ]);
   });
+  return { id, email: normalized };
 }
 
-function findUserByEmail(email) {
+async function findUserByEmail(email) {
   const normalized = String(email).toLowerCase().trim();
-  return new Promise((resolve, reject) => {
-    const db = getAppDb();
-    db.get('SELECT id, email, password_hash FROM users WHERE email = ?', [normalized], (err, row) => {
-      db.close();
-      if (err) return reject(err);
-      resolve(row || null);
-    });
+  return withDatabase(APP_DB, async (db) => {
+    const row = await dbGet(db, 'SELECT id, email, password_hash FROM users WHERE email = ?', [normalized]);
+    return row || null;
   });
 }
 
