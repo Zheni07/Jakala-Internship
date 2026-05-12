@@ -43,7 +43,7 @@ export function LoginPage() {
       setToken(data.token);
       navigate('/app', { replace: true });
     } catch (err) {
-      setError(err.message || 'Login failed');
+      setError(err.message || 'Входът не бе успешен');
     }
   };
 
@@ -90,7 +90,7 @@ export function RegisterPage() {
       setToken(data.token);
       navigate('/app', { replace: true });
     } catch (err) {
-      setError(err.message || 'Registration failed');
+      setError(err.message || 'Регистрацията не бе успешна');
     }
   };
 
