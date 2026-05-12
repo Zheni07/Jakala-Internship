@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const workspace = require('../workspace');
+const { Http } = require('../lib/http');
 
 module.exports = function registerAuthSessionRoutes(app, { upload }) {
   app.get('/auth/me', (req, res) => {
@@ -17,7 +18,7 @@ module.exports = function registerAuthSessionRoutes(app, { upload }) {
   });
 
   function uploadDatabaseHandler(req, res) {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: database)' });
+    if (!req.file) return Http.badRequest(res, 'No file uploaded (field name: database)');
     const slot = workspace.normalizeDbSlot(req.params.slot || req.dbSlot || 'db1');
     const ext = path.extname(req.file.originalname || '').toLowerCase();
     if (!['.sqlite', '.db', '.sqlite3'].includes(ext)) {
@@ -26,7 +27,7 @@ module.exports = function registerAuthSessionRoutes(app, { upload }) {
       } catch (e) {
         /* ignore */
       }
-      return res.status(400).json({ error: 'Only SQLite files (.sqlite, .db) are allowed' });
+      return Http.badRequest(res, 'Only SQLite files (.sqlite, .db) are allowed');
     }
     try {
       workspace.ensureNewUserWorkspace(req.user.id, slot);
@@ -45,7 +46,7 @@ module.exports = function registerAuthSessionRoutes(app, { upload }) {
       } catch (err) {
         /* ignore */
       }
-      res.status(500).json({ error: e.message || 'Upload failed' });
+      Http.serverError(res, e.message || 'Upload failed');
     }
   }
 

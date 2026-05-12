@@ -17,6 +17,9 @@ const {
   detectType,
   columnsFromPreview,
   generateDbtYaml,
+  validateNamedSqlPayload,
+  validateSqlOnlyPayload,
+  validateStagingSavePayload,
   getCachedData,
   setCachedData,
   invalidateCache,
@@ -44,24 +47,24 @@ module.exports = function registerStagingLayer(app) {
 // Save generated staging model SQL
 app.post('/generate-staging-model', (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
-  const { table, sql } = req.body;
-  if (!table || !sql) return res.status(400).json({ error: 'Missing table or sql' });
+  const payload = validateNamedSqlPayload({ name: req.body?.table, sql: req.body?.sql });
+  const table = payload.name;
+  const sql = payload.sql;
   const filePath = path.join(d.modelsStaging, `stg_${table}.sql`);
   fs.writeFile(filePath, sql, err => {
-    if (err) return res.status(500).json({ error: err.message });
+    if (err) return Http.serverError(res, err.message);
     res.json({ success: true, file: filePath });
   });
 });
 
 app.post('/generate-user-model', (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
-  const { name, sql } = req.body;
-  if (!name || !sql) return res.status(400).json({ error: 'Missing name or sql' });
+  const { name, sql } = validateNamedSqlPayload(req.body);
   const filePath = path.join(d.MARTS_DIR, `${name}.sql`);
   fs.mkdir(d.MARTS_DIR, { recursive: true }, (err) => {
-    if (err) return res.status(500).json({ error: err.message });
+    if (err) return Http.serverError(res, err.message);
     fs.writeFile(filePath, sql, err => {
-      if (err) return res.status(500).json({ error: err.message });
+      if (err) return Http.serverError(res, err.message);
       res.json({ success: true, file: filePath });
     });
   });
@@ -70,8 +73,7 @@ app.post('/generate-user-model', (req, res) => {
 // Preview custom staging SQL (returns up to 100 rows)
 app.post('/preview-staging-sql', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
-  const { sql } = req.body;
-  if (!sql) return Http.badRequest(res, 'Missing SQL');
+  const { sql } = validateSqlOnlyPayload(req.body);
   const previewSQL = ensureSqlLimit(sql.trim(), 100);
   try {
     const rows = await withDatabase(d.dbPath, (db) => dbAll(db, previewSQL));
@@ -84,8 +86,7 @@ app.post('/preview-staging-sql', async (req, res) => {
 // Auto-documentation preview endpoint
 app.post('/api/preview', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
-  const { sql } = req.body;
-  if (!sql) return Http.badRequest(res, 'Missing SQL');
+  const { sql } = validateSqlOnlyPayload(req.body);
   const previewSQL = ensureSqlLimit(sql.trim(), 100);
   try {
     const preview = await withDatabase(d.dbPath, (db) => dbAll(db, previewSQL));
@@ -122,10 +123,10 @@ app.get('/staging/:name', (req, res) => {
 
   const metaPath = path.join(d.METADATA_DIR, `${stagingName}.json`);
   fs.readFile(metaPath, 'utf8', (err, data) => {
-    if (err) return res.status(404).json({ error: 'Staging not found' });
+    if (err) return Http.notFound(res, 'Staging not found');
     const parsed = parseJsonSafe(data);
     if (parsed.error) {
-      return res.status(500).json({ error: 'Invalid staging metadata format' });
+      return Http.serverError(res, 'Invalid staging metadata format');
     }
     const staging = parsed.value;
     setCachedData(cacheUid, 'staging', stagingName, staging);
@@ -159,7 +160,7 @@ app.delete('/staging/:name', async (req, res) => {
     errors.push(err.message);
   }
   if (errors.length > 0) {
-    return res.status(500).json({ error: 'Failed to delete some files or table', details: errors });
+    return Http.jsonError(res, 500, 'Failed to delete some files or table', { details: errors });
   }
   res.json({ success: true });
 });
@@ -167,11 +168,10 @@ app.delete('/staging/:name', async (req, res) => {
 // Save custom staging SQL as dbt model and with metadata
 app.post('/save-staging-sql', (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
-  const { name, sql, dialect = 'sqlite', createTable, documentation, tableDescription, yaml } = req.body;
-  if (!name || !sql) return res.status(400).json({ error: 'Missing name or SQL' });
+  const { name, sql, dialect = 'sqlite', createTable, documentation, tableDescription, yaml } = validateStagingSavePayload(req.body);
   const filePath = path.join(d.modelsStaging, `${name}.sql`);
   fs.writeFile(filePath, sql, async err => {
-    if (err) return res.status(500).json({ error: err.message });
+    if (err) return Http.serverError(res, err.message);
     let preview = [];
     let doc = documentation || [];
     let tableCreated = false;
@@ -211,7 +211,7 @@ app.post('/save-staging-sql', (req, res) => {
       timestamp: new Date().toISOString()
     };
     fs.writeFile(path.join(d.METADATA_DIR, `${name}.json`), JSON.stringify(meta, null, 2), err => {
-      if (err) return res.status(500).json({ error: err.message });
+      if (err) return Http.serverError(res, err.message);
       const cacheUid = `${req.user.id}:${req.dbSlot}`;
       invalidateCache(cacheUid, 'staging', name);
       invalidateCache(cacheUid, 'table', `${name}:count`);
@@ -238,7 +238,7 @@ app.post('/drop-staged-tables', async (req, res) => {
       return { dropped: tables.length, errors };
     });
     if (errors.length > 0) {
-      return res.status(500).json({ error: 'Some tables could not be dropped', details: errors });
+      return Http.jsonError(res, 500, 'Some tables could not be dropped', { details: errors });
     }
     res.json({ success: true, dropped });
   } catch (err) {

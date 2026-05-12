@@ -17,6 +17,8 @@ const {
   detectType,
   columnsFromPreview,
   generateDbtYaml,
+  validateSqlOnlyPayload,
+  validateCuratedSavePayload,
   getCachedData,
   setCachedData,
   invalidateCache,
@@ -67,10 +69,10 @@ app.get('/curated-model/:name', (req, res) => {
 
   const metaPath = path.join(d.CURATED_META_DIR, `${modelName}.json`);
   fs.readFile(metaPath, 'utf8', (err, data) => {
-    if (err) return res.status(404).json({ error: 'Curated model not found' });
+    if (err) return Http.notFound(res, 'Curated model not found');
     const parsed = parseJsonSafe(data);
     if (parsed.error) {
-      return res.status(500).json({ error: 'Invalid curated model metadata format' });
+      return Http.serverError(res, 'Invalid curated model metadata format');
     }
     const model = parsed.value;
     setCachedData(cacheUid, 'curated-model', modelName, model);
@@ -83,8 +85,7 @@ app.post('/curated-models', async (req, res) => {
   const uid = req.user.id;
   const cacheUid = `${uid}:${req.dbSlot}`;
   const d = workspace.dirs(uid, req.dbSlot);
-  const { name, sql, documentation, tableDescription, createTable = true } = req.body;
-  if (!name || !sql) return res.status(400).json({ error: 'Missing name or SQL' });
+  const { name, sql, documentation, tableDescription, createTable = true } = validateCuratedSavePayload(req.body);
   const filePath = path.join(d.CURATED_DIR, `${name}.sql`);
   fs.writeFileSync(filePath, sql);
   let preview = [];
@@ -128,8 +129,7 @@ app.post('/curated-models', async (req, res) => {
 // Preview custom curated SQL (returns up to 100 rows and docs)
 app.post('/api/curated-preview', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
-  const { sql } = req.body;
-  if (!sql) return Http.badRequest(res, 'Missing SQL');
+  const { sql } = validateSqlOnlyPayload(req.body);
   const previewSQL = ensureSqlLimit(sql.trim(), 100);
   try {
     const preview = await withDatabase(d.dbPath, (db) => dbAll(db, previewSQL));
@@ -150,7 +150,7 @@ app.get('/curated-model/:name/data', async (req, res) => {
     const metaData = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     const sql = metaData.sql;
     if (!sql) {
-      return res.status(400).json({ error: 'No SQL query found for this model' });
+      return Http.badRequest(res, 'No SQL query found for this model');
     }
 
     let finalSQL = sql.trim();
@@ -215,7 +215,7 @@ app.get('/curated-model/:name/export', async (req, res) => {
     }
   } catch (err) {
     console.error(`Error exporting curated model: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    Http.serverError(res, err.message);
   }
 });
 };

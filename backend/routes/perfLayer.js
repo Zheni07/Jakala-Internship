@@ -17,6 +17,8 @@ const {
   detectType,
   columnsFromPreview,
   generateDbtYaml,
+  validatePerfManualPayload,
+  validatePerfDataflowPayload,
   getCachedData,
   setCachedData,
   invalidateCache,
@@ -45,8 +47,10 @@ module.exports = function registerPerfLayer(app) {
 app.post('/api/execute/manual', async (req, res) => {
   try {
     const d = workspace.dirs(req.user.id, req.dbSlot);
-    const { sql, rowLimit = FULL_CHART_ROWS, runId = randomUUID() } = req.body || {};
-    if (!sql) return res.status(400).json({ error: 'Missing sql' });
+    const payload = validatePerfManualPayload(req.body, FULL_CHART_ROWS);
+    const sql = payload.sql;
+    const rowLimit = payload.rowLimit;
+    const runId = payload.runId || randomUUID();
     runPerfJob({
       runId,
       mode: 'manual',
@@ -58,17 +62,22 @@ app.post('/api/execute/manual', async (req, res) => {
     });
     res.json({ runId, streamUrl: `/api/perf/${runId}/stream` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    if (err?.status === 400) {
+      return Http.badRequest(res, err.message, err.details ? { details: err.details } : undefined);
+    }
+    Http.serverError(res, err.message);
   }
 });
 
 app.post('/api/execute/dataflow', async (req, res) => {
   try {
     const d = workspace.dirs(req.user.id, req.dbSlot);
-    const { curatedName, rowLimit = FULL_CHART_ROWS, runId = randomUUID() } = req.body || {};
-    if (!curatedName) return res.status(400).json({ error: 'Missing curatedName' });
+    const payload = validatePerfDataflowPayload(req.body, FULL_CHART_ROWS);
+    const curatedName = payload.curatedName;
+    const rowLimit = payload.rowLimit;
+    const runId = payload.runId || randomUUID();
     const sqlPath = path.join(d.CURATED_DIR, `${curatedName}.sql`);
-    if (!fs.existsSync(sqlPath)) return res.status(404).json({ error: 'Curated SQL not found' });
+    if (!fs.existsSync(sqlPath)) return Http.notFound(res, 'Curated SQL not found');
     const sql = fs.readFileSync(sqlPath, 'utf8');
     runPerfJob({
       runId,
@@ -82,7 +91,10 @@ app.post('/api/execute/dataflow', async (req, res) => {
     });
     res.json({ runId, streamUrl: `/api/perf/${runId}/stream` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    if (err?.status === 400) {
+      return Http.badRequest(res, err.message, err.details ? { details: err.details } : undefined);
+    }
+    Http.serverError(res, err.message);
   }
 });
 
@@ -91,10 +103,10 @@ app.get('/api/perf/:runId/stream', (req, res) => {
   const { runId } = req.params;
   const job = perfJobs.get(runId);
   if (!job) {
-    return res.status(404).json({ error: 'Run not found' });
+    return Http.notFound(res, 'Run not found');
   }
   if (job.userId !== req.user.id) {
-    return res.status(403).json({ error: 'Forbidden' });
+    return Http.forbidden(res, 'Forbidden');
   }
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -117,10 +129,10 @@ app.get('/api/perf/:runId/stream', (req, res) => {
 app.post('/api/perf/:runId/cancel', (req, res) => {
   const { runId } = req.params;
   const job = perfJobs.get(runId);
-  if (!job) return res.status(404).json({ error: 'Run not found' });
-  if (job.userId !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+  if (!job) return Http.notFound(res, 'Run not found');
+  if (job.userId !== req.user.id) return Http.forbidden(res, 'Forbidden');
   if (job.status !== 'running') {
-    return res.status(409).json({ error: `Run is already ${job.status}` });
+    return Http.conflict(res, `Run is already ${job.status}`);
   }
   job.cancelRequested = true;
   if (job.db && typeof job.db.interrupt === 'function') {
@@ -142,7 +154,7 @@ app.get('/api/perf/:runId', (req, res) => {
     return res.json({ meta: inMem.meta, samples: inMem.samples, final: inMem.samples[inMem.samples.length - 1] });
   }
   const jsonPath = path.join(d.PERF_DIR, `${runId}.json`);
-  if (!fs.existsSync(jsonPath)) return res.status(404).json({ error: 'Perf run not found' });
+  if (!fs.existsSync(jsonPath)) return Http.notFound(res, 'Perf run not found');
   const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
   res.json(data);
 });

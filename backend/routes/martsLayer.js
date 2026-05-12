@@ -17,6 +17,8 @@ const {
   detectType,
   columnsFromPreview,
   generateDbtYaml,
+  validateNamedSqlPayload,
+  validateSqlOnlyPayload,
   getCachedData,
   setCachedData,
   invalidateCache,
@@ -59,10 +61,10 @@ app.get('/mart/:name', (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
   const metaPath = path.join(d.MARTS_META_DIR, `${req.params.name}.json`);
   fs.readFile(metaPath, 'utf8', (err, data) => {
-    if (err) return res.status(404).json({ error: 'Mart model not found' });
+    if (err) return Http.notFound(res, 'Mart model not found');
     const parsed = parseJsonSafe(data);
     if (parsed.error) {
-      return res.status(500).json({ error: 'Invalid mart model metadata format' });
+      return Http.serverError(res, 'Invalid mart model metadata format');
     }
     res.json(parsed.value);
   });
@@ -78,18 +80,21 @@ app.get('/mart/:name/source-sql', (req, res) => {
     const sourceSql = inlineCuratedIntoMartSql(martSql, d.CURATED_META_DIR);
     res.json({ martSql, sourceSql });
   } catch (err) {
-    res.status(404).json({ error: 'Mart model not found' });
+    Http.notFound(res, 'Mart model not found');
   }
 });
 
 // Compare a user-provided source SQL against a mart by executing both and timing
 app.post('/mart/:name/compare', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
-  const { sourceSql, rowLimit = 1000, runs = 5 } = req.body || {};
+  const payload = req.body || {};
+  const { sourceSql } = validateSqlOnlyPayload(payload, 'sourceSql');
+  const rowLimitRaw = payload.rowLimit === undefined ? 1000 : Number(payload.rowLimit);
+  const rowLimit = Number.isFinite(rowLimitRaw) && rowLimitRaw > 0 ? Math.floor(rowLimitRaw) : 1000;
+  const runsRaw = payload.runs === undefined ? 5 : Number(payload.runs);
+  const runs = Number.isFinite(runsRaw) && runsRaw > 0 ? Math.floor(runsRaw) : 5;
   const metaPath = path.join(d.MARTS_META_DIR, `${req.params.name}.json`);
   try {
-    if (!sourceSql) return res.status(400).json({ error: 'Missing sourceSql' });
-
     // Basic validation: source SQL should not reference curated or mart tables
     const srcLower = String(sourceSql).toLowerCase();
     const badNames = [];
@@ -108,9 +113,8 @@ app.post('/mart/:name/compare', async (req, res) => {
       // ignore validation errors, fall back to allowing query
     }
     if (badNames.length > 0) {
-      return res.status(400).json({
-        error: 'Source SQL must not reference curated or mart tables',
-        tables: Array.from(new Set(badNames))
+      return Http.badRequest(res, 'Source SQL must not reference curated or mart tables', {
+        tables: Array.from(new Set(badNames)),
       });
     }
 
@@ -118,7 +122,7 @@ app.post('/mart/:name/compare', async (req, res) => {
 
     const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     const martSql = meta.sql || '';
-    if (!martSql) return res.status(400).json({ error: 'Mart SQL missing' });
+    if (!martSql) return Http.badRequest(res, 'Mart SQL missing');
 
     const martTimes = [];
     const rawTimes = [];
@@ -222,15 +226,14 @@ app.post('/mart/:name/compare', async (req, res) => {
       shape_equal: sameShape,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message || String(err) });
+    Http.serverError(res, err.message || String(err));
   }
 });
 
 // Save or update a mart model
 app.post('/marts', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
-  const { name, sql, documentation, tableDescription } = req.body;
-  if (!name || !sql) return Http.badRequest(res, 'Missing name or SQL');
+  const { name, sql, documentation, tableDescription } = validateNamedSqlPayload(req.body);
   const filePath = path.join(d.MARTS_DIR, `${name}.sql`);
   fs.writeFileSync(filePath, sql);
   let preview = [];
@@ -259,8 +262,7 @@ app.post('/marts', async (req, res) => {
 // Preview custom mart SQL (returns up to 100 rows and docs)
 app.post('/api/mart-preview', async (req, res) => {
   const d = workspace.dirs(req.user.id, req.dbSlot);
-  const { sql } = req.body;
-  if (!sql) return Http.badRequest(res, 'Missing SQL');
+  const { sql } = validateSqlOnlyPayload(req.body);
   const previewSQL = ensureSqlLimit(sql.trim(), 100);
   try {
     const preview = await withDatabase(d.dbPath, (db) => dbAll(db, previewSQL));
@@ -281,7 +283,7 @@ app.get('/mart/:name/data', async (req, res) => {
     const metaData = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     const sql = metaData.sql;
     if (!sql) {
-      return res.status(400).json({ error: 'No SQL query found for this model' });
+      return Http.badRequest(res, 'No SQL query found for this model');
     }
 
     let finalSQL = sql.trim();
@@ -346,7 +348,7 @@ app.get('/mart/:name/export', async (req, res) => {
     }
   } catch (err) {
     console.error(`Error exporting mart model: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    Http.serverError(res, err.message);
   }
 });
 };

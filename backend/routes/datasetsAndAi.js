@@ -275,16 +275,16 @@ app.get('/ai/curated-history', (req, res) => {
 app.post('/ai/curated-history/use', (req, res) => {
   const { historyId, suggestionIndex } = req.body || {};
   if (!historyId && suggestionIndex === undefined) {
-    return res.status(400).json({ error: 'historyId or suggestionIndex is required' });
+    return Http.badRequest(res, 'historyId or suggestionIndex is required');
   }
   const filePath = curatedHistoryPath(req.user.id, req.dbSlot);
   const entries = readJsonArray(filePath);
-  if (!entries.length) return res.status(404).json({ error: 'No curated AI history found' });
+  if (!entries.length) return Http.notFound(res, 'No curated AI history found');
 
   const targetIdx = historyId
     ? entries.findIndex((e) => e.id === historyId)
     : 0;
-  if (targetIdx < 0) return res.status(404).json({ error: 'History entry not found' });
+  if (targetIdx < 0) return Http.notFound(res, 'History entry not found');
   entries[targetIdx] = {
     ...entries[targetIdx],
     usedSuggestionIndex: Number.isFinite(Number(suggestionIndex)) ? Number(suggestionIndex) : 0,

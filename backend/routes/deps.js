@@ -16,6 +16,14 @@ const { listJsonStemNames } = require('../lib/metadataListing');
 const { computePreviewAndDocumentation } = require('../lib/previewDocumentation');
 const { detectType, columnsFromPreview } = require('../lib/columnInference');
 const { generateDbtYaml } = require('../lib/dbtYaml');
+const {
+  validateNamedSqlPayload,
+  validateSqlOnlyPayload,
+  validatePerfManualPayload,
+  validatePerfDataflowPayload,
+  validateStagingSavePayload,
+  validateCuratedSavePayload,
+} = require('../lib/validation');
 const config = require('../config');
 
 const {
@@ -61,6 +69,12 @@ module.exports = {
   detectType,
   columnsFromPreview,
   generateDbtYaml,
+  validateNamedSqlPayload,
+  validateSqlOnlyPayload,
+  validatePerfManualPayload,
+  validatePerfDataflowPayload,
+  validateStagingSavePayload,
+  validateCuratedSavePayload,
   getCachedData,
   setCachedData,
   invalidateCache,

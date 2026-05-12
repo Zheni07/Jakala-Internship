@@ -13,6 +13,7 @@ const {
 const registerAuthPublicRoutes = require('./routes/authPublic');
 const registerAuthSessionRoutes = require('./routes/authSession');
 const registerRoutes = require('./routes/registerRoutes');
+const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
 function createApp() {
   const app = express();
@@ -46,6 +47,9 @@ function createApp() {
   });
 
   registerRoutes(app);
+
+  app.use(notFoundHandler);
+  app.use(errorHandler);
 
   return app;
 }
