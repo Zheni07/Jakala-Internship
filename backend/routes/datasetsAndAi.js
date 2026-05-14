@@ -23,7 +23,7 @@ const {
   perfJobs,
   runPerfJob,
   safeSqlIdentifier,
-  buildCuratedSuggestions,
+  validateSelectSuggestions,
   analysisHistoryPath,
   curatedHistoryPath,
   readJsonArray,
@@ -31,6 +31,7 @@ const {
   appendHistoryEntry,
   extractImportantCharacteristics,
   generateCuratedSuggestionsWithLLM,
+  generateDashboardInsightsWithLLM,
   parseJsonSafe,
   parseLimitQueryParam,
   toCardinalityLabel,
@@ -140,35 +141,30 @@ app.get('/ai/database-analysis', async (req, res) => {
         });
     });
 
-    const aiInsights = [];
-    if (largestTables[0]) {
-      aiInsights.push({
-        kind: 'focus_table',
-        title: `Focus first on "${largestTables[0].table}"`,
-        explanation: `It has the largest volume (${largestTables[0].rowCount} rows), so optimizing this table will likely have the biggest impact.`,
-      });
+    const compactSummary = {
+      summary: {
+        tables: tableProfiles.length,
+        totalRows,
+        totalColumns,
+      },
+      largestTables,
+      qualityRisks: qualityRisks.slice(0, 12),
+      numericHighlights: numericHighlights.slice(0, 12),
+    };
+
+    const llmDash = await generateDashboardInsightsWithLLM(compactSummary);
+    if (!llmDash.ok) {
+      const status =
+        llmDash.code === 'OLLAMA_UNREACHABLE' ||
+        llmDash.code === 'OLLAMA_MODEL_MISSING' ||
+        llmDash.code === 'OLLAMA_TIMEOUT' ||
+        llmDash.code === 'OLLAMA_NO_MODELS'
+          ? 503
+          : 502;
+      return Http.jsonError(res, status, llmDash.message, llmDash.code ? { code: llmDash.code } : undefined);
     }
-    if (qualityRisks.length > 0) {
-      aiInsights.push({
-        kind: 'data_quality',
-        title: 'Data quality risks detected',
-        explanation: `${qualityRisks.length} column(s) show high null ratios in sampled data.`,
-      });
-    }
-    if (numericHighlights.length > 0) {
-      const top = numericHighlights[0];
-      aiInsights.push({
-        kind: 'numeric_distribution',
-        title: `Numeric spread insight for ${top.table}.${top.column}`,
-        explanation: `Median ${top.p50}, P90 ${top.p90}, range [${top.min}, ${top.max}] in sampled rows.`,
-      });
-    }
-    if (tableProfiles.length > 8) {
-      aiInsights.push({
-        kind: 'modeling_strategy',
-        title: 'Recommended modeling strategy',
-        explanation: 'Create curated intermediate models by domain first, then marts, to keep complexity manageable.',
-      });
+    if (!Array.isArray(llmDash.insights) || llmDash.insights.length === 0) {
+      return Http.jsonError(res, 502, 'Ollama returned no insights.', { code: 'OLLAMA_EMPTY_INSIGHTS' });
     }
 
     const result = {
@@ -181,7 +177,8 @@ app.get('/ai/database-analysis', async (req, res) => {
       largestTables,
       qualityRisks: qualityRisks.slice(0, 15),
       numericHighlights: numericHighlights.slice(0, 20),
-      aiInsights,
+      aiInsights: llmDash.insights,
+      aiInsightsSource: 'ollama',
       tableProfiles,
     };
 
@@ -221,22 +218,31 @@ app.post('/ai/curated-suggestions', async (req, res) => {
         tableColumnsByTable[table] = cols.map((c) => ({ name: c.name, type: c.type || '' }));
       }
 
-      let suggestions = await generateCuratedSuggestionsWithLLM({
+      const llm = await generateCuratedSuggestionsWithLLM({
         selectedTables: validTables,
         tableColumnsByTable,
         prompt,
         criteria,
       });
-      let source = 'llm';
-      if (!suggestions || suggestions.length === 0) {
-        suggestions = buildCuratedSuggestions({
-          selectedTables: validTables,
-          tableColumnsByTable,
-          prompt,
-          criteria,
-        });
-        source = 'rule-based';
+      if (!llm.ok) {
+        const status =
+          llm.code === 'OLLAMA_UNREACHABLE' ||
+          llm.code === 'OLLAMA_MODEL_MISSING' ||
+          llm.code === 'OLLAMA_TIMEOUT' ||
+          llm.code === 'OLLAMA_NO_MODELS'
+            ? 503
+            : 502;
+        return Http.jsonError(res, status, llm.message, llm.code ? { code: llm.code } : undefined);
       }
+      const validated = await validateSelectSuggestions(ldb, llm.suggestions);
+      if (validated.length === 0) {
+        return Http.jsonError(
+          res,
+          422,
+          'AI returned SQL that failed validation against your database (syntax or unknown tables/columns). Try a different prompt or fewer tables.'
+        );
+      }
+      const source = 'llm';
 
       appendHistoryEntry(curatedHistoryPath(req.user.id, req.dbSlot), {
         id: randomUUID(),
@@ -245,7 +251,7 @@ app.post('/ai/curated-suggestions', async (req, res) => {
         selectedTables: validTables,
         criteria,
         prompt,
-        suggestions,
+        suggestions: validated,
         usedSuggestionIndex: null,
       }, 200);
 
@@ -254,7 +260,7 @@ app.post('/ai/curated-suggestions', async (req, res) => {
         dbSlot: req.dbSlot,
         source,
         selectedTables: validTables,
-        suggestions,
+        suggestions: validated,
       });
     });
   } catch (err) {

@@ -7,9 +7,9 @@ function AuthTopHeader() {
   return (
     <header className="modern-header ui-auth-header">
       <Link to="/" className="logo-title modern-header-logo-link">DataFlow Studio</Link>
-      <nav className="modern-header-auth" aria-label="Профил">
-        <Link to="/register" className="modern-header-auth-btn modern-header-auth-btn--ghost">Регистрация</Link>
-        <Link to="/login" className="modern-header-auth-btn modern-header-auth-btn--primary">Вход в профил</Link>
+      <nav className="modern-header-auth" aria-label="Account">
+        <Link to="/register" className="modern-header-auth-btn modern-header-auth-btn--ghost">Register</Link>
+        <Link to="/login" className="modern-header-auth-btn modern-header-auth-btn--primary">Log in</Link>
       </nav>
     </header>
   );
@@ -43,7 +43,7 @@ export function LoginPage() {
       setToken(data.token);
       navigate('/app', { replace: true });
     } catch (err) {
-      setError(err.message || 'Входът не бе успешен');
+      setError(err.message || 'Login failed');
     }
   };
 
@@ -52,23 +52,23 @@ export function LoginPage() {
       <AuthTopHeader />
       <div className="ui-auth-wrap">
         <UiCard className="ui-auth-card">
-          <h1 className="ui-auth-title">Вход</h1>
+          <h1 className="ui-auth-title">Log in</h1>
           <p className="ui-auth-subtitle">DataFlow Studio</p>
           {error && <UiBanner tone="error">{error}</UiBanner>}
           <form onSubmit={submit}>
-            <UiField label="Имейл">
+            <UiField label="Email">
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
             </UiField>
-            <UiField label="Парола">
+            <UiField label="Password">
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
             </UiField>
-            <UiButton type="submit" variant="primary" style={{ width: '100%' }}>Влез</UiButton>
+            <UiButton type="submit" variant="primary" style={{ width: '100%' }}>Sign in</UiButton>
           </form>
           <p style={{ marginTop: 20, fontSize: 14, color: '#64748b' }}>
-            Нямате акаунт? <Link to="/register" style={{ color: '#2563eb' }}>Регистрация</Link>
+            No account? <Link to="/register" style={{ color: '#2563eb' }}>Register</Link>
           </p>
           <p style={{ marginTop: 12, fontSize: 13 }}>
-            <Link to="/" style={{ color: '#94a3b8' }}>← Начало</Link>
+            <Link to="/" style={{ color: '#94a3b8' }}>← Home</Link>
           </p>
         </UiCard>
       </div>
@@ -90,7 +90,7 @@ export function RegisterPage() {
       setToken(data.token);
       navigate('/app', { replace: true });
     } catch (err) {
-      setError(err.message || 'Регистрацията не бе успешна');
+      setError(err.message || 'Registration failed');
     }
   };
 
@@ -99,23 +99,23 @@ export function RegisterPage() {
       <AuthTopHeader />
       <div className="ui-auth-wrap">
         <UiCard className="ui-auth-card">
-          <h1 className="ui-auth-title">Регистрация</h1>
-          <p className="ui-auth-subtitle">Създава се празно работно пространство. За да работите с данни, след вход качете свой SQLite файл (.sqlite или .db) от горната лента.</p>
+          <h1 className="ui-auth-title">Register</h1>
+          <p className="ui-auth-subtitle">You get an empty workspace. After signing in, upload a SQLite file (.sqlite or .db) from the top bar to work with data.</p>
           {error && <UiBanner tone="error">{error}</UiBanner>}
           <form onSubmit={submit}>
-            <UiField label="Имейл">
+            <UiField label="Email">
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
             </UiField>
-            <UiField label="Парола (мин. 6 знака)">
+            <UiField label="Password (min. 6 characters)">
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} autoComplete="new-password" />
             </UiField>
-            <UiButton type="submit" variant="success" style={{ width: '100%' }}>Създай акаунт</UiButton>
+            <UiButton type="submit" variant="success" style={{ width: '100%' }}>Create account</UiButton>
           </form>
           <p style={{ marginTop: 20, fontSize: 14, color: '#64748b' }}>
-            Вече имате акаунт? <Link to="/login" style={{ color: '#2563eb' }}>Вход</Link>
+            Already have an account? <Link to="/login" style={{ color: '#2563eb' }}>Log in</Link>
           </p>
           <p style={{ marginTop: 12, fontSize: 13 }}>
-            <Link to="/" style={{ color: '#94a3b8' }}>← Начало</Link>
+            <Link to="/" style={{ color: '#94a3b8' }}>← Home</Link>
           </p>
         </UiCard>
       </div>
@@ -149,9 +149,11 @@ export function AppUserBar() {
 
   useEffect(() => {
     refreshMe();
-    const onUploaded = () => refreshMe();
-    window.addEventListener('dfs-db-uploaded', onUploaded);
-    return () => window.removeEventListener('dfs-db-uploaded', onUploaded);
+    const onSlotChanged = () => refreshMe();
+    window.addEventListener('dfs-db-slot-changed', onSlotChanged);
+    return () => {
+      window.removeEventListener('dfs-db-slot-changed', onSlotChanged);
+    };
   }, []);
 
   useEffect(() => {
@@ -176,23 +178,25 @@ export function AppUserBar() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    setUploadMsg(`Качване към ${slot.toUpperCase()}...`);
+    setUploadMsg(`Uploading to ${slot.toUpperCase()}…`);
     try {
       const fd = new FormData();
       fd.append('database', file);
       const res = await fetch(`${API_BASE}/auth/upload-database/${slot}`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${getToken()}`, 'x-database-slot': activeSlot },
+        headers: { Authorization: `Bearer ${getToken()}`, 'x-database-slot': slot },
         body: fd,
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Качването не успя');
-      setUploadMsg(`Базата е качена в ${slot.toUpperCase()}.`);
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      setDbSlot(slot);
+      setActiveSlot(slot);
+      setUploadMsg(`Database saved to ${slot.toUpperCase()}. Active slot switched.`);
       setSlotStatuses((prev) => ({ ...prev, [slot]: { hasDatabase: true } }));
       setTimeout(() => setUploadMsg(''), 4000);
-      window.dispatchEvent(new CustomEvent('dfs-db-uploaded'));
+      window.dispatchEvent(new CustomEvent('dfs-db-slot-changed', { detail: { slot } }));
     } catch (err) {
-      setUploadMsg(err.message || 'Грешка');
+      setUploadMsg(err.message || 'Error');
     }
   };
 
@@ -206,7 +210,7 @@ export function AppUserBar() {
     <div ref={barRef} className="app-userbar-wrap" style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
       {!slotStatuses[activeSlot]?.hasDatabase && (
         <div className="app-userbar-alert" style={{ padding: '10px 20px', background: '#422006', color: '#fef3c7', fontSize: 13, borderBottom: '1px solid #78350f' }}>
-          Няма качена база за {activeSlot.toUpperCase()}. Качете SQLite файл за активния слот.
+          No database uploaded for {activeSlot.toUpperCase()}. Upload a SQLite file for this slot.
         </div>
       )}
       <div className="app-userbar-main" style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 20px', background: '#0f172a', color: '#e2e8f0', borderBottom: '1px solid #1e293b' }}>
@@ -216,16 +220,16 @@ export function AppUserBar() {
         <option value="db2">DB2 {slotStatuses.db2?.hasDatabase ? '✅' : '—'}</option>
       </select>
       <label className="ui-upload-btn" htmlFor="dfs-upload-db1">
-        Качи в DB1
+        Upload to DB1
         <input id="dfs-upload-db1" type="file" accept=".sqlite,.db,.sqlite3,application/octet-stream" style={{ display: 'none' }} onChange={onDbFile('db1')} />
       </label>
       <label className="ui-upload-btn" htmlFor="dfs-upload-db2">
-        Качи в DB2
+        Upload to DB2
         <input id="dfs-upload-db2" type="file" accept=".sqlite,.db,.sqlite3,application/octet-stream" style={{ display: 'none' }} onChange={onDbFile('db2')} />
       </label>
       {uploadMsg && <span style={{ fontSize: 12, color: '#94a3b8' }}>{uploadMsg}</span>}
       <button type="button" onClick={logout} style={{ marginLeft: 'auto', padding: '6px 12px', borderRadius: 6, border: '1px solid #334155', background: 'transparent', color: '#e2e8f0', cursor: 'pointer', fontSize: 13 }}>
-        Изход
+        Log out
       </button>
       </div>
     </div>

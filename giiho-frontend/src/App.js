@@ -18,11 +18,11 @@ function LandingPage() {
   const nodeR = 38;
   const angles = [270, 342, 54, 126, 198];
   const labels = [
-    { label: 'Трансф.', grad: 'transformGrad' },
-    { label: 'Модел', grad: 'modelGrad' },
-    { label: 'Качество', grad: 'qualityGrad', sub: 'Проверка' },
-    { label: 'Резултати', grad: 'resultsGrad' },
-    { label: 'Сурови', grad: 'rawGrad' },
+    { label: 'Transform', grad: 'transformGrad' },
+    { label: 'Model', grad: 'modelGrad' },
+    { label: 'Quality', grad: 'qualityGrad', sub: 'Check' },
+    { label: 'Results', grad: 'resultsGrad' },
+    { label: 'Raw', grad: 'rawGrad' },
   ];
   const nodes = angles.map((deg, i) => {
     const rad = (deg * Math.PI) / 180;
@@ -43,15 +43,15 @@ function LandingPage() {
     <div className="modern-root">
       <header className="modern-header">
         <Link to="/" className="logo-title modern-header-logo-link">DataFlow Studio</Link>
-        <nav className="modern-header-auth" aria-label="Профил">
+        <nav className="modern-header-auth" aria-label="Account">
           {getToken() ? (
             <button type="button" className="modern-header-auth-btn modern-header-auth-btn--primary" onClick={() => navigate('/app')}>
-              Моето пространство
+              My workspace
             </button>
           ) : (
             <>
-              <Link to="/register" className="modern-header-auth-btn modern-header-auth-btn--ghost">Регистрация</Link>
-              <Link to="/login" className="modern-header-auth-btn modern-header-auth-btn--primary">Вход в профил</Link>
+              <Link to="/register" className="modern-header-auth-btn modern-header-auth-btn--ghost">Register</Link>
+              <Link to="/login" className="modern-header-auth-btn modern-header-auth-btn--primary">Log in</Link>
             </>
           )}
         </nav>
@@ -59,11 +59,11 @@ function LandingPage() {
 
       <section className="modern-hero">
         <div className="hero-left">
-          <h1>Изграждайте надеждни продукти за данни</h1>
-          <p className="hero-desc">DataFlow Studio обединява моделиране, документация и сравнения на производителност в елегантен интерфейс, създаден за бързи решения и чиста архитектура.</p>
+          <h1>Build reliable data products</h1>
+          <p className="hero-desc">DataFlow Studio brings modeling, documentation, and performance comparisons into one polished interface for fast decisions and clean architecture.</p>
           <div className="hero-actions">
-            <button className="modern-cta" onClick={() => navigate(getToken() ? '/app' : '/login')}>Старт</button>
-            <button className="modern-cta modern-cta--secondary" onClick={() => navigate('/register')}>Създай профил</button>
+            <button className="modern-cta" onClick={() => navigate(getToken() ? '/app' : '/login')}>Get started</button>
+            <button className="modern-cta modern-cta--secondary" onClick={() => navigate('/register')}>Create account</button>
           </div>
         </div>
         <div className="hero-right pipeline-center">
@@ -114,15 +114,15 @@ function LandingPage() {
       </section>
 
       <section id="how" className="features-section timeline-features">
-        <h2 className="features-title">Как Работи</h2>
+        <h2 className="features-title">How it works</h2>
         <div className="features-timeline">
           {[
-            { title: 'Сурови данни', desc: 'Импорт и организация' },
-            { title: 'Трансформация', desc: 'Визуален редактор' },
-            { title: 'Моделиране', desc: 'AI интеграция' },
-            { title: 'Анализ', desc: 'Резултати в реално време' },
-            { title: 'Сигурност', desc: 'Надеждно и безопасно' },
-            { title: 'Автоматизация', desc: 'Планиране' },
+            { title: 'Raw data', desc: 'Import and organize' },
+            { title: 'Transform', desc: 'Visual builder' },
+            { title: 'Model', desc: 'AI-assisted modeling' },
+            { title: 'Analytics', desc: 'Live results' },
+            { title: 'Security', desc: 'Safe and reliable' },
+            { title: 'Automation', desc: 'Scheduling' },
           ].map((item, i, arr) => (
             <div className="timeline-step" key={item.title}>
               <div className="timeline-dot" />
@@ -137,15 +137,15 @@ function LandingPage() {
       </section>
 
       <section id="why" className="modern-why no-icons-why">
-        <h2>Защо да изберете DataFlow Studio?</h2>
-        <p className="why-intro">Създавайте, валидирайте и публикувайте модели с увереност.</p>
+        <h2>Why DataFlow Studio?</h2>
+        <p className="why-intro">Design, validate, and ship models with confidence.</p>
         <div className="why-list">
           {[
-            { title: 'Без код', desc: 'Плъзни и пусни' },
-            { title: 'Яснота', desc: 'Визуални зависимости' },
-            { title: 'Проследяване', desc: 'Статус в реално време' },
-            { title: 'Документация', desc: 'Централизирана' },
-            { title: 'Модерен UX', desc: 'Интуитивен' },
+            { title: 'No-code', desc: 'Drag and drop' },
+            { title: 'Clarity', desc: 'Visual dependencies' },
+            { title: 'Tracking', desc: 'Real-time status' },
+            { title: 'Docs', desc: 'Centralized' },
+            { title: 'Modern UX', desc: 'Intuitive' },
           ].map((r) => (
             <div className="why-list-item" key={r.title}>
               <span className="why-list-title">{r.title}</span>
@@ -233,7 +233,7 @@ function Staging() {
         setSaveStatus("");
       })
       .catch(err => {
-      setPreviewError("Неуспешно зареждане на staging: " + err.message);
+      setPreviewError("Failed to load staging: " + err.message);
       });
   }, [selectedStaging]);
 
@@ -304,7 +304,7 @@ function Staging() {
         }
       }
     } catch (err) {
-      setPreviewError("Неуспешен преглед: " + err.message);
+      setPreviewError("Preview failed: " + err.message);
     }
     setIsPreviewing(false);
   };
@@ -398,7 +398,7 @@ function Staging() {
       });
       const data = await res.json();
       if (data.success) {
-        setSaveStatus("Staging моделът е запазен успешно.");
+        setSaveStatus("Staging saved successfully.");
         setSelectedStaging(stagingName); // reload this staging
         // Immediately refresh tables so Models updates
         api("/tables").then(res => res.json()).then(tableList => {
@@ -407,10 +407,10 @@ function Staging() {
           }
         });
       } else {
-        setSaveStatus(data.error || "Неуспешно запазване на staging модела.");
+        setSaveStatus(data.error || "Failed to save staging.");
       }
     } catch (err) {
-      setSaveStatus("Неуспешно запазване на staging модела: " + err.message);
+      setSaveStatus("Failed to save staging: " + err.message);
     }
     setIsSaving(false);
   };
@@ -421,13 +421,13 @@ function Staging() {
       <div style={{ padding: 40, maxWidth: 1200, margin: '0 auto' }}>
         {/* Remove the Load Saved Staging dropdown and its label */}
         {/* <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
-          <label style={{ fontWeight: 600 }}>Зареди запазен staging:</label>
+          <label style={{ fontWeight: 600 }}>Load saved staging:</label>
           <select
             value={selectedStaging}
             onChange={e => setSelectedStaging(e.target.value)}
             style={{ fontSize: 16, padding: 8, borderRadius: 4, border: '1px solid #ccc', minWidth: 220 }}
           >
-            <option value="">-- Избери --</option>
+            <option value="">-- Select --</option>
             {stagings.map(name => (
               <option key={name} value={name}>{name}</option>
             ))}
@@ -451,7 +451,7 @@ function Staging() {
               <textarea
                 value={sqlInput}
                 onChange={e => setSqlInput(e.target.value)}
-                placeholder="SQL за трансформацията. Няма готови примери — започнете от вашите таблици след като качите .sqlite база; тогава използвайте Preview и Save."
+                placeholder="SQL for the transformation. No canned examples—use your own tables after you upload a .sqlite database, then use Preview and Save."
                 style={{ width: '100%', minHeight: 120, fontSize: 15, padding: 8, borderRadius: 4, border: '1px solid #ccc', marginTop: 4 }}
               />
             </div>
@@ -468,7 +468,7 @@ function Staging() {
                 disabled={!stagingName.trim() || !sqlInput.trim() || isSaving}
                 style={{ padding: '10px 24px', fontSize: 16, background: '#00b887', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, marginRight: 16 }}
               >
-                {isSaving ? 'Запазване...' : 'Запази staging'}
+                {isSaving ? 'Saving...' : 'Save staging'}
               </button>
               <button
                 onClick={async () => {
@@ -485,15 +485,15 @@ function Staging() {
                     document.body.removeChild(link);
                     URL.revokeObjectURL(url);
                   } catch (e) {
-                    setSaveStatus('Неуспешно изтегляне.');
+                    setSaveStatus('Download failed.');
                   }
                 }}
                 disabled={!selectedStaging || !selectedStaging.startsWith('stg_')}
                 style={{ padding: '10px 24px', fontSize: 16, background: '#222b45', color: '#fff', border: 'none', borderRadius: 6, cursor: (!selectedStaging || !selectedStaging.startsWith('stg_')) ? 'not-allowed' : 'pointer', fontWeight: 600 }}
               >
-                Изтегли CSV
+                Download CSV
               </button>
-              {saveStatus && <span style={{ marginLeft: 18, color: saveStatus.includes('success') ? '#00b887' : 'red', fontWeight: 600 }}>{saveStatus}</span>}
+              {saveStatus && <span style={{ marginLeft: 18, color: /success/i.test(saveStatus) ? '#00b887' : 'red', fontWeight: 600 }}>{saveStatus}</span>}
             </div>
             {previewError && <div style={{ color: 'red', marginBottom: 16 }}>{previewError}</div>}
             {previewRows.length > 0 && (
@@ -736,7 +736,7 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
               minWidth: 0,
             }}
           >
-            Модели
+            Models
             <span style={{ marginLeft: 8 }}>{openSection === 'tables' ? '▲' : '▼'}</span>
           </button>
           {openSection === 'tables' && (
@@ -804,7 +804,7 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
           </button>
           {openSection === 'staging' && (
             <div style={{ marginTop: -8, marginBottom: 12, paddingLeft: 8 }}>
-              <div style={{ color: '#8f9bb3', fontSize: 13, marginBottom: 4, marginLeft: 2 }}>Запазени staging модели</div>
+              <div style={{ color: '#8f9bb3', fontSize: 13, marginBottom: 4, marginLeft: 2 }}>Saved stagings</div>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {stagingNames.length === 0 && (
                   <li style={{ color: '#8f9bb3', fontSize: 13, padding: '6px 10px' }}>No stagings saved.</li>
@@ -838,7 +838,7 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
                           const resp = await api(`/staging/${name}`, { method: 'DELETE' });
                           if (!resp.ok) {
                             const data = await resp.json();
-                            setDeleteError(data.error || 'Неуспешно изтриване.');
+                            setDeleteError(data.error || 'Failed to delete.');
                           } else {
                             // Refresh stagings and tables
                             api("/stagings").then(async (res) => {
@@ -849,7 +849,7 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
                             api("/tables").then(res => res.json()).then((body) => window.setTables && window.setTables(body));
                           }
                         } catch (err) {
-                          setDeleteError(err.message || 'Неуспешно изтриване.');
+                          setDeleteError(err.message || 'Failed to delete.');
                         }
                         setDeletingStaging("");
                       }}
@@ -912,12 +912,12 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
               minWidth: 0,
             }}
           >
-            Кюрирани
+            Curated
             <span style={{ marginLeft: 8 }}>{openSection === 'curated' ? '▲' : '▼'}</span>
           </button>
           {openSection === 'curated' && (
             <div style={{ marginTop: -8, marginBottom: 12, paddingLeft: 8 }}>
-              <div style={{ color: '#8f9bb3', fontSize: 13, marginBottom: 4, marginLeft: 2 }}>Кюрирани модели</div>
+              <div style={{ color: '#8f9bb3', fontSize: 13, marginBottom: 4, marginLeft: 2 }}>Curated models</div>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {curatedNames.length === 0 && (
                   <li style={{ color: '#8f9bb3', fontSize: 13, padding: '6px 10px' }}>No curated models.</li>
@@ -962,7 +962,7 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
                     transition: 'background 0.2s',
                   }}
                 >
-                  + Нов кюриран модел
+                  + New curated model
                 </button>
                 <button
                   onClick={() => setShowCuratedPanel(true)}
@@ -982,7 +982,7 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
                   }}
                   title="Open curated tables panel"
                 >
-                  Кюриран модел
+                  Curated model
                 </button>
               </ul>
             </div>
@@ -1014,12 +1014,12 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
               minWidth: 0,
             }}
           >
-            Мартове
+            Marts
             <span style={{ marginLeft: 8 }}>{openSection === 'marts' ? '▲' : '▼'}</span>
           </button>
           {openSection === 'marts' && (
             <div style={{ marginTop: -8, marginBottom: 12, paddingLeft: 8 }}>
-              <div style={{ color: '#8f9bb3', fontSize: 13, marginBottom: 4, marginLeft: 2 }}>Март модели</div>
+              <div style={{ color: '#8f9bb3', fontSize: 13, marginBottom: 4, marginLeft: 2 }}>Mart models</div>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {martNames.length === 0 && (
                   <li style={{ color: '#8f9bb3', fontSize: 13, padding: '6px 10px' }}>No mart models.</li>
@@ -1064,7 +1064,7 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
                     transition: 'background 0.2s',
                   }}
                 >
-                  + Нов март модел
+                  + New mart model
                 </button>
                 <button
                   onClick={() => setShowMartsPanel(true)}
@@ -1084,7 +1084,7 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
                   }}
                   title="Open mart models panel"
                 >
-                  Март модел
+                  Mart model
                 </button>
               </ul>
             </div>
@@ -1139,7 +1139,7 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
               transition: 'box-shadow 0.2s, border 0.2s',
               minWidth: 0,
             }}
-            title="Сравнение на сурови заявки с март резултати"
+            title="Compare raw SQL against mart results"
           >
             Performance Compare
           </button>
@@ -1149,7 +1149,7 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
         <div style={{ position: 'fixed', top: 0, left: 220, right: 0, bottom: 0, background: 'rgba(0,0,0,0.45)', zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
           <div style={{ background: '#f7fafc', borderRadius: 10, width: '520px', maxHeight: '80vh', boxShadow: '0 12px 40px rgba(0,0,0,0.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '16px 18px', background: '#222b45', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontWeight: 700, letterSpacing: 0.5 }}>Кюрирани таблици</div>
+              <div style={{ fontWeight: 700, letterSpacing: 0.5 }}>Curated tables</div>
               <button onClick={() => setShowCuratedPanel(false)} style={{ background: 'transparent', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 18 }}>✕</button>
             </div>
             <div style={{ padding: '14px 18px', overflowY: 'auto' }}>
@@ -1191,7 +1191,7 @@ function SidebarNav({ tables, selectedTable, setSelectedTable, sidebarStagings, 
         <div style={{ position: 'fixed', top: 0, left: 220, right: 0, bottom: 0, background: 'rgba(0,0,0,0.45)', zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
           <div style={{ background: '#f7fafc', borderRadius: 10, width: '520px', maxHeight: '80vh', boxShadow: '0 12px 40px rgba(0,0,0,0.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '16px 18px', background: '#222b45', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontWeight: 700, letterSpacing: 0.5 }}>Март модели</div>
+              <div style={{ fontWeight: 700, letterSpacing: 0.5 }}>Mart models</div>
               <button onClick={() => setShowMartsPanel(false)} style={{ background: 'transparent', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 18 }}>✕</button>
             </div>
             <div style={{ padding: '14px 18px', overflowY: 'auto' }}>
@@ -1302,7 +1302,7 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
         setSaveStatus("");
       })
       .catch(err => {
-      setPreviewError("Неуспешно зареждане на кюриран модел: " + err.message);
+      setPreviewError("Failed to load curated model: " + err.message);
       });
   }, [selectedCurated]);
 
@@ -1338,7 +1338,7 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
         }
       }
     } catch (err) {
-      setPreviewError("Неуспешен преглед: " + err.message);
+      setPreviewError("Preview failed: " + err.message);
     }
     setIsPreviewing(false);
   };
@@ -1428,7 +1428,7 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
       });
       const data = await res.json();
       if (data.success) {
-        setSaveStatus("Кюрираният модел е запазен успешно.");
+        setSaveStatus("Curated model saved successfully.");
         setSelectedCurated(modelName);
         // Refresh curated models in sidebar
         api("/curated-models").then(async (res) => {
@@ -1442,10 +1442,10 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
           }
         });
       } else {
-        setSaveStatus(data.error || "Неуспешно запазване на кюриран модел.");
+        setSaveStatus(data.error || "Failed to save curated model.");
       }
     } catch (err) {
-      setSaveStatus("Неуспешно запазване на кюриран модел: " + err.message);
+      setSaveStatus("Failed to save curated model: " + err.message);
     }
     setIsSaving(false);
   };
@@ -1453,14 +1453,14 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
   // Download export logic
   const handleDownload = async (format = 'csv') => {
     if (!selectedCurated) {
-      setSaveStatus("Моля, първо изберете кюриран модел.");
+      setSaveStatus("Please select a curated model first.");
       return;
     }
     try {
       const response = await api(`/curated-model/${selectedCurated}/export?format=${format}`);
       if (!response.ok) {
         const errorData = await response.json();
-        setSaveStatus(errorData.error || "Неуспешно изтегляне на данни.");
+        setSaveStatus(errorData.error || "Failed to download data.");
         return;
       }
       const blob = await response.blob();
@@ -1472,9 +1472,9 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      setSaveStatus("Данните са изтеглени успешно.");
+      setSaveStatus("Data downloaded successfully.");
     } catch (err) {
-      setSaveStatus("Неуспешно изтегляне на данни: " + err.message);
+      setSaveStatus("Failed to download data: " + err.message);
     }
   };
 
@@ -1497,7 +1497,7 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
         setDataRows(data.rows || []);
       }
     } catch (err) {
-      setDataError("Неуспешно зареждане на кюрирани данни: " + err.message);
+      setDataError("Failed to load curated data: " + err.message);
       setDataRows([]);
     }
     setIsLoadingData(false);
@@ -1525,23 +1525,22 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
     setAiSuggestions([]);
     setAiSource('');
     if (aiSelectedTables.length === 0) {
-      setAiError('Избери поне една таблица за AI предложения.');
+      setAiError('Select at least one table for AI suggestions.');
       return;
     }
     setAiLoading(true);
     try {
       const res = await api('/ai/curated-suggestions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        json: {
           selectedTables: aiSelectedTables,
           criteria: aiCriteria,
           prompt: aiPrompt,
-        }),
+        },
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        setAiError(data.error || 'Неуспешно генериране на AI предложения.');
+        setAiError(data.error || 'Failed to generate AI suggestions.');
       } else {
         setAiSource(data.source || '');
         setAiSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
@@ -1549,7 +1548,7 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
         setAiHistory(Array.isArray(h.entries) ? h.entries : []);
       }
     } catch (err) {
-      setAiError(err.message || 'Неуспешно генериране на AI предложения.');
+      setAiError(err.message || 'Failed to generate AI suggestions.');
     } finally {
       setAiLoading(false);
     }
@@ -1558,14 +1557,14 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
   if (showTableOnly) {
     return (
       <div style={{ minHeight: '100vh', background: '#f4f6fa', padding: 0 }}>
-        <h1 style={{ padding: '40px 0 0 40px' }}>Данни от кюриран модел</h1>
+        <h1 style={{ padding: '40px 0 0 40px' }}>Curated model data</h1>
         <div style={{ padding: 40, maxWidth: 1200, margin: '0 auto' }}>
           {dataError && <div style={{ color: 'red', marginBottom: 16 }}>{dataError}</div>}
-          {isLoadingData && <div style={{ marginBottom: 16, color: '#666' }}>Зареждане...</div>}
+          {isLoadingData && <div style={{ marginBottom: 16, color: '#666' }}>Loading...</div>}
           {dataRows.length > 0 && (
             <div style={{ background: '#fff', borderRadius: 8, boxShadow: '0 2px 8px #0001', padding: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <div style={{ color: '#00b887', fontWeight: 700 }}>Показана кюрирана таблица ({dataRows.length} реда)</div>
+                <div style={{ color: '#00b887', fontWeight: 700 }}>Showing curated table ({dataRows.length} rows)</div>
                 <button
                   onClick={() => handleLoadCuratedData(true)}
                   style={{ padding: '8px 14px', fontSize: 14, background: '#4b5563', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
@@ -1608,13 +1607,13 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
   // UI
   return (
     <div style={{ minHeight: '100vh', background: '#f4f6fa', padding: 0 }}>
-      <h1 style={{ padding: '40px 0 0 40px' }}>Дефиниция на кюриран модел</h1>
+      <h1 style={{ padding: '40px 0 0 40px' }}>Curated model definition</h1>
       <div style={{ padding: 40, maxWidth: 1200, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 32 }}>
           {/* Left: SQL Editor and Preview */}
           <div style={{ flex: 2, minWidth: 0, height: '100%' }}>
             <div style={{ marginBottom: 20 }}>
-              <label style={{ fontWeight: 600 }}>Име на кюриран модел</label><br />
+              <label style={{ fontWeight: 600 }}>Curated model name</label><br />
               <input
                 type="text"
                 value={modelName}
@@ -1628,14 +1627,14 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
               <textarea
                 value={sqlInput}
                 onChange={e => setSqlInput(e.target.value)}
-                placeholder="SQL за кюриран модел. Създава се от нулата — без шаблони; нужна е качена база за Преглед/Запази и обикновено вече дефинирани staging таблици."
+                placeholder="SQL for the curated model. Built from scratch—no templates; upload a database for Preview/Save and usually define staging models first."
                 style={{ width: '100%', minHeight: 120, fontSize: 15, padding: 8, borderRadius: 4, border: '1px solid #ccc', marginTop: 4 }}
               />
             </div>
             <div style={{ marginBottom: 20, background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 8, padding: 12 }}>
               <div style={{ fontWeight: 700, marginBottom: 8 }}>AI SQL Suggestions</div>
               <div style={{ fontSize: 13, color: '#475569', marginBottom: 10 }}>
-                Изберете таблици, добавете критерии и заявка, след което AI ще предложи SQL за кюриран слой.
+                Pick tables, add criteria and a prompt, then AI will suggest SQL for the curated layer.
               </div>
               <div style={{ marginBottom: 10 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Tables</div>
@@ -1654,7 +1653,7 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
                 <div>
-                  <label style={{ fontSize: 13, fontWeight: 600 }}>Criteria (SQL WHERE без "WHERE")</label>
+                  <label style={{ fontSize: 13, fontWeight: 600 }}>Criteria (SQL WHERE clause without the word WHERE)</label>
                   <input
                     value={aiCriteria}
                     onChange={(e) => setAiCriteria(e.target.value)}
@@ -1678,10 +1677,10 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
                 disabled={aiLoading}
                 style={{ padding: '8px 14px', border: 'none', borderRadius: 6, background: '#4338ca', color: '#fff', fontWeight: 700, cursor: aiLoading ? 'not-allowed' : 'pointer' }}
               >
-                {aiLoading ? 'Генериране...' : 'Генерирай AI предложения'}
+                {aiLoading ? 'Generating...' : 'Generate AI suggestions'}
               </button>
               {aiError && <div style={{ marginTop: 8, color: '#b91c1c', fontSize: 13 }}>{aiError}</div>}
-              {aiSource && <div style={{ marginTop: 8, color: '#334155', fontSize: 12 }}>Източник на предложения: {aiSource}</div>}
+              {aiSource && <div style={{ marginTop: 8, color: '#334155', fontSize: 12 }}>Suggestion source: {aiSource}</div>}
               {aiSuggestions.length > 0 && (
                 <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {aiSuggestions.map((s, idx) => (
@@ -1718,7 +1717,7 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
                         <tr>
-                          <th style={{ textAlign: 'left', padding: 6, borderBottom: '1px solid #e2e8f0' }}>Генерирано</th>
+                          <th style={{ textAlign: 'left', padding: 6, borderBottom: '1px solid #e2e8f0' }}>Generated</th>
                           <th style={{ textAlign: 'left', padding: 6, borderBottom: '1px solid #e2e8f0' }}>Source</th>
                           <th style={{ textAlign: 'left', padding: 6, borderBottom: '1px solid #e2e8f0' }}>Tables</th>
                           <th style={{ textAlign: 'left', padding: 6, borderBottom: '1px solid #e2e8f0' }}>Used</th>
@@ -1752,7 +1751,7 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
                 disabled={!modelName.trim() || !sqlInput.trim() || isSaving}
                 style={{ padding: '10px 24px', fontSize: 16, background: '#00b887', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, marginRight: 16 }}
               >
-                {isSaving ? 'Запазване...' : 'Запази кюриран модел'}
+                {isSaving ? 'Saving...' : 'Save curated model'}
               </button>
               <button
                 onClick={() => handleDownload('csv')}
@@ -1780,11 +1779,11 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
                   e.currentTarget.style.transform = 'translateY(0)';
                   e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.18)';
                 }}
-                title="Изтегли всички резултати от заявката като CSV файл"
+                title="Download all query results as a CSV file"
               >
-                📥 Изтегли данни
+                📥 Download data
               </button>
-              {saveStatus && <span style={{ marginLeft: 18, color: saveStatus.includes('success') ? '#00b887' : 'red', fontWeight: 600 }}>{saveStatus}</span>}
+              {saveStatus && <span style={{ marginLeft: 18, color: /success/i.test(saveStatus) ? '#00b887' : 'red', fontWeight: 600 }}>{saveStatus}</span>}
             </div>
             {previewError && <div style={{ color: 'red', marginBottom: 16 }}>{previewError}</div>}
             {previewRows.length > 0 && (
@@ -1812,12 +1811,12 @@ function CuratedModel({ curatedModels, setCuratedModels, selectedCurated, setSel
                 </div>
               </div>
             )}
-            {isLoadingData && <div style={{ marginTop: 12, color: '#666' }}>Зареждане на запазена март таблица…</div>}
+            {isLoadingData && <div style={{ marginTop: 12, color: '#666' }}>Loading saved mart table…</div>}
             {dataError && <div style={{ color: 'red', marginTop: 12 }}>{dataError}</div>}
             {dataRows.length > 0 && (
               <div style={{ marginTop: 20, background: '#fff', borderRadius: 8, boxShadow: '0 2px 8px #0001', padding: 12 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <div style={{ color: '#00b887', fontWeight: 700 }}>Запазена март таблица ({dataRows.length} реда)</div>
+                  <div style={{ color: '#00b887', fontWeight: 700 }}>Saved mart table ({dataRows.length} rows)</div>
                   <button
                     onClick={() => handleLoadCuratedData(true)}
                     disabled={isLoadingData}
@@ -1976,7 +1975,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
         setSaveStatus("");
       })
       .catch(err => {
-      setPreviewError("Неуспешно зареждане на март модел: " + err.message);
+      setPreviewError("Failed to load mart model: " + err.message);
       });
   }, [selectedMart]);
 
@@ -2012,7 +2011,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
         }
       }
     } catch (err) {
-      setPreviewError("Неуспешен преглед: " + err.message);
+      setPreviewError("Preview failed: " + err.message);
     }
     setIsPreviewing(false);
   };
@@ -2099,7 +2098,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
       });
       const data = await res.json();
       if (data.success) {
-        setSaveStatus("Март моделът е запазен успешно.");
+        setSaveStatus("Mart model saved successfully.");
         setSelectedMart(modelName);
         // Refresh marts models in sidebar
         api("/marts").then(async (res) => {
@@ -2107,10 +2106,10 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
           setMartsModels(res.ok && Array.isArray(data.models) ? data.models : []);
         });
       } else {
-        setSaveStatus(data.error || "Неуспешно запазване на март модел.");
+        setSaveStatus(data.error || "Failed to save mart model.");
       }
     } catch (err) {
-      setSaveStatus("Неуспешно запазване на март модел: " + err.message);
+      setSaveStatus("Failed to save mart model: " + err.message);
     }
     setIsSaving(false);
   };
@@ -2125,7 +2124,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
       const response = await api(`/mart/${selectedMart}/export?format=${format}`);
       if (!response.ok) {
         const errorData = await response.json();
-        setSaveStatus(errorData.error || "Неуспешно изтегляне на данни.");
+        setSaveStatus(errorData.error || "Failed to download data.");
         return;
       }
       const blob = await response.blob();
@@ -2139,7 +2138,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
       document.body.removeChild(a);
       setSaveStatus("Data downloaded successfully!");
     } catch (err) {
-      setSaveStatus("Неуспешно изтегляне на данни: " + err.message);
+      setSaveStatus("Failed to download data: " + err.message);
     }
   };
 
@@ -2162,7 +2161,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
         setDataRows(data.rows || []);
       }
     } catch (err) {
-      setDataError("Неуспешно зареждане на март данни: " + err.message);
+      setDataError("Failed to load mart data: " + err.message);
       setDataRows([]);
     }
     setIsLoadingData(false);
@@ -2204,7 +2203,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
   if (showTableOnly) {
     return (
       <div style={{ minHeight: '100vh', background: '#f4f6fa', padding: 0 }}>
-        <h1 style={{ padding: '40px 0 0 40px' }}>Данни от март модел</h1>
+        <h1 style={{ padding: '40px 0 0 40px' }}>Mart model data</h1>
         <div style={{ padding: 40, maxWidth: 1200, margin: '0 auto' }}>
           <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
             <button
@@ -2309,13 +2308,13 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
   // UI
   return (
     <div style={{ minHeight: '100vh', background: '#f4f6fa', padding: 0 }}>
-      <h1 style={{ padding: '40px 0 0 40px' }}>Дефиниция на март модел</h1>
+      <h1 style={{ padding: '40px 0 0 40px' }}>Mart model definition</h1>
       <div style={{ padding: 40, maxWidth: 1200, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 32 }}>
           {/* Left: SQL Editor and Preview */}
           <div style={{ flex: 2, minWidth: 0, height: '100%' }}>
             <div style={{ marginBottom: 20 }}>
-              <label style={{ fontWeight: 600 }}>Име на март модел</label><br />
+              <label style={{ fontWeight: 600 }}>Mart model name</label><br />
               <input
                 type="text"
                 value={modelName}
@@ -2329,7 +2328,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
               <textarea
                 value={sqlInput}
                 onChange={e => setSqlInput(e.target.value)}
-                placeholder="SQL за mart модел. Без готови примери — дефинирайте го вие; нужна е качена база за Preview/Save и curated слой според вашия pipeline."
+                placeholder="SQL for the mart model. No canned examples—define it yourself; upload a database for Preview/Save and align the curated layer with your pipeline."
                 style={{ width: '100%', minHeight: 120, fontSize: 15, padding: 8, borderRadius: 4, border: '1px solid #ccc', marginTop: 4 }}
               />
             </div>
@@ -2346,7 +2345,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
                 disabled={!modelName.trim() || !sqlInput.trim() || isSaving}
                 style={{ padding: '10px 24px', fontSize: 16, background: '#00b887', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, marginRight: 16 }}
               >
-                {isSaving ? 'Запазване...' : 'Запази март модел'}
+                {isSaving ? 'Saving...' : 'Save mart model'}
               </button>
               <button
                 onClick={() => handleDownload('csv')}
@@ -2378,7 +2377,7 @@ function MartModel({ martsModels, setMartsModels, selectedMart, setSelectedMart 
               >
                 📥 Download Data
               </button>
-              {saveStatus && <span style={{ marginLeft: 18, color: saveStatus.includes('success') ? '#00b887' : 'red', fontWeight: 600 }}>{saveStatus}</span>}
+              {saveStatus && <span style={{ marginLeft: 18, color: /success/i.test(saveStatus) ? '#00b887' : 'red', fontWeight: 600 }}>{saveStatus}</span>}
             </div>
             {previewError && <div style={{ color: 'red', marginBottom: 16 }}>{previewError}</div>}
             {previewRows.length > 0 && (
@@ -2629,7 +2628,7 @@ function PerformanceCompare({ martsModels, selectedMart, setSelectedMart }) {
             />
             </div>
           <div style={{ marginBottom: 12 }}>
-            <div style={{ color: '#111827', fontWeight: 700, marginBottom: 6 }}>Суров SQL (изходни таблици)</div>
+            <div style={{ color: '#111827', fontWeight: 700, marginBottom: 6 }}>Raw SQL (source tables)</div>
           <textarea
               value={rawSql}
               onChange={e => setRawSql(e.target.value)}
@@ -2665,18 +2664,18 @@ function PerformanceCompare({ martsModels, selectedMart, setSelectedMart }) {
           <div style={{ background: '#fff', borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.06)', padding: 14 }}>
             <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>Summary</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10, color: '#111827', fontSize: 14 }}>
-              <div><div style={{ color: '#6b7280', fontSize: 12 }}>Редове (сурови)</div><div style={{ fontWeight: 800 }}>{rowsSummary(rawRows)}</div></div>
+              <div><div style={{ color: '#6b7280', fontSize: 12 }}>Raw rows</div><div style={{ fontWeight: 800 }}>{rowsSummary(rawRows)}</div></div>
               <div><div style={{ color: '#6b7280', fontSize: 12 }}>Mart rows</div><div style={{ fontWeight: 800 }}>{rowsSummary(martRows)}</div></div>
-              <div><div style={{ color: '#6b7280', fontSize: 12 }}>Време (сурови)</div><div style={{ fontWeight: 800 }}>{rawDuration ? rawDuration.toFixed(1) : '—'} ms</div></div>
-              <div><div style={{ color: '#6b7280', fontSize: 12 }}>Време (март)</div><div style={{ fontWeight: 800 }}>{martDuration ? martDuration.toFixed(1) : '—'} ms</div></div>
+              <div><div style={{ color: '#6b7280', fontSize: 12 }}>Raw duration</div><div style={{ fontWeight: 800 }}>{rawDuration ? rawDuration.toFixed(1) : '—'} ms</div></div>
+              <div><div style={{ color: '#6b7280', fontSize: 12 }}>Mart duration</div><div style={{ fontWeight: 800 }}>{martDuration ? martDuration.toFixed(1) : '—'} ms</div></div>
               </div>
               </div>
           <div style={{ background: '#fff', borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.06)', padding: 14 }}>
-            <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>Резултат (суров)</div>
+            <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>Raw result</div>
             {renderTable(rawRows)}
               </div>
           <div style={{ background: '#fff', borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.06)', padding: 14 }}>
-            <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>Резултат (март)</div>
+            <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>Mart result</div>
             {renderTable(martRows)}
           </div>
         </div>
@@ -2705,11 +2704,8 @@ function App() {
         setTables(tableList);
         if (res.ok && Array.isArray(body)) {
           setError('');
-          if (body.includes('data(1)')) {
-            setSelectedTable('data(1)');
-          }
         } else if (body && body.error === 'NO_DATABASE') {
-          setError(body.message || 'Качете SQLite база данни от лентата с профила.');
+          setError(body.message || 'Upload a SQLite database from the profile bar.');
         } else if (!res.ok) {
           setError('Could not fetch tables from backend.');
         }
@@ -2746,7 +2742,6 @@ function App() {
 
   useEffect(() => {
     loadAppData();
-    const onDbUploaded = () => loadAppData();
     const onDbSlotChanged = () => {
       setSelectedTable('');
       setSelectedCurated('');
@@ -2754,10 +2749,8 @@ function App() {
       setTableData([]);
       loadAppData();
     };
-    window.addEventListener('dfs-db-uploaded', onDbUploaded);
     window.addEventListener('dfs-db-slot-changed', onDbSlotChanged);
     return () => {
-      window.removeEventListener('dfs-db-uploaded', onDbUploaded);
       window.removeEventListener('dfs-db-slot-changed', onDbSlotChanged);
     };
   }, [loadAppData]);
@@ -2819,22 +2812,22 @@ function App() {
                 <Route index element={
                   <div style={{ padding: 40 }}>
                     <UiPageHeader
-                      title="Преглед на SQLite база данни"
-                      subtitle="Изберете таблица от страничното меню, за да видите данните."
+                      title="SQLite database viewer"
+                      subtitle="Pick a table in the sidebar to view its rows."
                     />
                     {error && <UiBanner tone="error">{error}</UiBanner>}
                     {!selectedTable && (
-                      <UiEmptyState>Натиснете име на таблица вляво, за да видите данните.</UiEmptyState>
+                      <UiEmptyState>Click a table name on the left to view its data.</UiEmptyState>
                     )}
                     {selectedTable && (
                       <>
                         <UiCard style={{ marginBottom: 24, padding: 20, display: 'inline-block' }}>
                           <h2 style={{ margin: 0, color: '#00b887', fontSize: 22 }}>{selectedTable}</h2>
-                          <span style={{ color: '#8f9bb3', fontSize: 14 }}>Редове: {tableData.length}</span>
+                          <span style={{ color: '#8f9bb3', fontSize: 14 }}>Rows: {tableData.length}</span>
                         </UiCard>
-                        {loading && <p>Зареждане на данни от таблицата...</p>}
+                        {loading && <p>Loading table data...</p>}
                         {!loading && tableData.length === 0 && (
-                          <UiEmptyState>Няма данни в тази таблица.</UiEmptyState>
+                          <UiEmptyState>No rows in this table.</UiEmptyState>
                         )}
                         {tableData.length > 0 && (
                           <UiDataTable rows={tableData} />

@@ -19,7 +19,7 @@ export default function AIDashboard() {
       setAnalysis(data);
       setSnapshots(Array.isArray(history.snapshots) ? history.snapshots : []);
     } catch (err) {
-      setError(err.message || 'Неуспешен AI анализ.');
+      setError(err.message || 'AI analysis failed.');
       setAnalysis(null);
       setSnapshots([]);
     } finally {
@@ -29,16 +29,16 @@ export default function AIDashboard() {
 
   useEffect(() => {
     loadAnalysis();
-    const onUploaded = () => loadAnalysis();
-    window.addEventListener('dfs-db-uploaded', onUploaded);
-    return () => window.removeEventListener('dfs-db-uploaded', onUploaded);
+    const onDbChanged = () => loadAnalysis();
+    window.addEventListener('dfs-db-slot-changed', onDbChanged);
+    return () => window.removeEventListener('dfs-db-slot-changed', onDbChanged);
   }, []);
 
   return (
     <div style={{ padding: 40 }}>
       <UiPageHeader
         title="AI Database Dashboard"
-        subtitle="Автоматичен анализ и инсайти върху качената база."
+        subtitle="Profile metrics are computed locally; AI Insights are generated only with Ollama from summary statistics (no raw row dump)."
       />
       {error && <UiBanner tone="error">{error}</UiBanner>}
       <div style={{ marginBottom: 16 }}>
@@ -47,29 +47,29 @@ export default function AIDashboard() {
           onClick={loadAnalysis}
           style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 14px', fontWeight: 700 }}
         >
-          Обнови AI анализа
+          Refresh AI analysis
         </button>
       </div>
 
-      {loading && <UiCard style={{ padding: 16 }}>AI анализира базата...</UiCard>}
+      {loading && <UiCard style={{ padding: 16 }}>Running AI analysis on the database…</UiCard>}
 
       {!loading && !analysis && (
-        <UiEmptyState>Няма наличен анализ. Качи база или натисни "Обнови AI анализа".</UiEmptyState>
+        <UiEmptyState>No analysis yet. Upload a database or click &quot;Refresh AI analysis&quot;.</UiEmptyState>
       )}
 
       {!loading && analysis && (
         <div style={{ display: 'grid', gap: 16 }}>
           <UiCard style={{ padding: 16 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
-              <Metric title="Таблици" value={analysis.summary?.tables} />
-              <Metric title="Общо редове" value={analysis.summary?.totalRows} />
-              <Metric title="Общо колони" value={analysis.summary?.totalColumns} />
+              <Metric title="Tables" value={analysis.summary?.tables} />
+              <Metric title="Total rows" value={analysis.summary?.totalRows} />
+              <Metric title="Total columns" value={analysis.summary?.totalColumns} />
             </div>
           </UiCard>
 
           <UiCard style={{ padding: 16 }}>
             <h3 style={{ marginTop: 0 }}>AI Insights</h3>
-            {!analysis.aiInsights?.length && <div>Няма инсайти.</div>}
+            {!analysis.aiInsights?.length && <div>No insights yet.</div>}
             {analysis.aiInsights?.map((insight, idx) => (
               <div key={`${insight.kind}-${idx}`} style={{ padding: '10px 0', borderBottom: '1px solid #e2e8f0' }}>
                 <div style={{ fontWeight: 700 }}>{insight.title}</div>
@@ -80,7 +80,7 @@ export default function AIDashboard() {
 
           <UiCard style={{ padding: 16 }}>
             <h3 style={{ marginTop: 0 }}>Latest Important Characteristics</h3>
-            {snapshots.length < 2 && <div style={{ color: '#64748b' }}>Нужни са поне 2 snapshot-а за сравнение.</div>}
+            {snapshots.length < 2 && <div style={{ color: '#64748b' }}>At least two snapshots are required for comparison.</div>}
             {snapshots.length >= 2 && (
               <SimpleTable rows={buildLatestCharacteristicsRows(snapshots[0], snapshots[1])} />
             )}
@@ -97,7 +97,7 @@ export default function AIDashboard() {
           </UiCard>
 
           <UiCard style={{ padding: 16 }}>
-            <h3 style={{ marginTop: 0 }}>Най-големи таблици</h3>
+            <h3 style={{ marginTop: 0 }}>Largest tables</h3>
             <SimpleTable rows={(analysis.largestTables || []).map((t) => ({
               table: t.table,
               rows: t.rowCount,
@@ -160,7 +160,7 @@ function Metric({ title, value }) {
 }
 
 function SimpleTable({ rows }) {
-  if (!rows || rows.length === 0) return <div style={{ color: '#64748b' }}>Няма данни.</div>;
+  if (!rows || rows.length === 0) return <div style={{ color: '#64748b' }}>No data.</div>;
   const columns = Object.keys(rows[0]);
   return (
     <div style={{ overflowX: 'auto' }}>

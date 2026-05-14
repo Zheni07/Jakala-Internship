@@ -13,7 +13,7 @@ function requireUploadedSqlite(req, res, next) {
   if (!workspace.userHasDatabase(req.user.id, req.dbSlot)) {
     return res.status(400).json({
       error: 'NO_DATABASE',
-      message: `Качете SQLite файл (.sqlite или .db) за ${req.dbSlot.toUpperCase()} от профила, за да работите с данни.`,
+      message: `Upload a SQLite file (.sqlite or .db) for ${req.dbSlot.toUpperCase()} from the profile bar to work with data.`,
     });
   }
   next();
